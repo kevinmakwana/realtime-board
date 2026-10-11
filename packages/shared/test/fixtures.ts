@@ -22,4 +22,4 @@ export const ev = <T extends BoardEvent['type']>(
   type: T,
   body: Omit<Extract<BoardEvent, { type: T }>, 'seq' | 'type' | 'boardId' | 'actorId' | 'ts'>,
 ): BoardEvent =>
-  ({ seq, type, boardId: ids.board, actorId: ids.user, ts: '2026-01-01T00:00:00.000Z', ...body }) as BoardEvent;
+  ({ seq, type, boardId: ids.board, actorId: ids.user, ts: '2026-01-01T00:00:00.000Z', ...body }) as unknown as BoardEvent;
