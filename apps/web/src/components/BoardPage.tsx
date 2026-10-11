@@ -1,0 +1,47 @@
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { io } from 'socket.io-client';
+import { setSession, type Session } from '../api';
+import { BoardClient, type BoardSocket } from '../lib/boardClient';
+import { uuid } from '../lib/uuid';
+import { navigate } from '../router';
+import { BoardView } from './BoardView';
+
+/** Owns the socket + sync engine for one board and tears them down on leave. */
+export function BoardPage({ boardId, session }: { boardId: string; session: Session }) {
+  const [client, setClient] = useState<BoardClient | null>(null);
+
+  useEffect(() => {
+    // `cid` is a per-tab id. The nginx load balancer hashes on it, so each tab sticks to one instance
+    // while different tabs spread across instances (hashing on IP would pin every local tab together).
+    const socket: BoardSocket = io({ auth: { token: session.token }, query: { cid: uuid() } });
+    const c = new BoardClient(socket, boardId, session.user);
+    setClient(c);
+    return () => {
+      c.dispose();
+      setClient(null);
+    };
+  }, [boardId, session]);
+
+  if (!client) return null;
+  return <ConnectedBoard client={client} session={session} />;
+}
+
+function ConnectedBoard({ client, session }: { client: BoardClient; session: Session }) {
+  const vm = useSyncExternalStore(client.subscribe, client.getSnapshot);
+
+  useEffect(() => {
+    if (vm.status === 'unauthorized') setSession(null);
+  }, [vm.status]);
+
+  if (!vm.state) {
+    return (
+      <div className="page center">
+        <p role="status">{vm.status === 'reconnecting' ? 'Reconnecting…' : 'Opening board…'}</p>
+        <button className="btn ghost" onClick={() => navigate('/')}>
+          Back to boards
+        </button>
+      </div>
+    );
+  }
+  return <BoardView client={client} vm={vm} state={vm.state} session={session} />;
+}
