@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "concurrently -n server,web -c blue,green \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
     "build": "npm run build -w packages/shared && npm run build -w apps/server && npm run build -w apps/web",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces --if-present",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
