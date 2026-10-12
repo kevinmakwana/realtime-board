@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { io } from 'socket.io-client';
 import { setSession, type Session } from '../api';
 import { BoardClient, type BoardSocket } from '../lib/boardClient';
+import { pinnedNode } from '../lib/node';
 import { uuid } from '../lib/uuid';
 import { navigate } from '../router';
 import { BoardView } from './BoardView';
@@ -13,7 +14,9 @@ export function BoardPage({ boardId, session }: { boardId: string; session: Sess
   useEffect(() => {
     // `cid` is a per-tab id. The nginx load balancer hashes on it, so each tab sticks to one instance
     // while different tabs spread across instances (hashing on IP would pin every local tab together).
-    const socket: BoardSocket = io({ auth: { token: session.token }, query: { cid: uuid() } });
+    // `node` optionally pins the tab to a specific instance (see lib/node.ts).
+    const node = pinnedNode();
+    const socket: BoardSocket = io({ auth: { token: session.token }, query: { cid: uuid(), ...(node && { node }) } });
     // Test hook: lets Playwright sever the transport to exercise reconnect + catch-up.
     if (import.meta.env.DEV) (window as unknown as { __boardSocket?: BoardSocket }).__boardSocket = socket;
     const c = new BoardClient(socket, boardId, session.user);

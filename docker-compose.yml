@@ -1,6 +1,53 @@
 name: realtime-board
 
+# `docker compose up -d`                  -> Postgres + Redis only (run the apps with `npm run dev`)
+# `docker compose --profile scale up`     -> + 2 server instances behind nginx with sticky sessions
+x-server: &server
+  profiles: [scale]
+  build:
+    context: .
+    target: server
+  restart: unless-stopped
+  environment: &server-env
+    PORT: "3001"
+    DATABASE_URL: postgres://board:board@postgres:5432/board
+    REDIS_URL: redis://redis:6379
+    JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+    WEB_ORIGIN: http://localhost:${NGINX_PORT:-8088}
+    AUTH_DEV_LOGIN: "true" # demo only: lets the sign-in page offer one-click fictional personas
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+
 services:
+  server-1:
+    <<: *server
+    environment:
+      <<: *server-env
+      INSTANCE_ID: server-1
+
+  server-2:
+    <<: *server
+    environment:
+      <<: *server-env
+      INSTANCE_ID: server-2
+
+  nginx:
+    profiles: [scale]
+    build:
+      context: .
+      target: web
+    ports:
+      - "${NGINX_PORT:-8088}:80"
+    depends_on:
+      server-1: { condition: service_healthy }
+      server-2: { condition: service_healthy }
+
   postgres:
     image: postgres:17-alpine
     environment:
