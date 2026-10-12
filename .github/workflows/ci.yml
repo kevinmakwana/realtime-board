@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgres://board:board@localhost:5432/board
+  REDIS_URL: redis://localhost:6379
+
+jobs:
+  test:
+    name: Typecheck, unit and integration tests
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: board
+          POSTGRES_PASSWORD: board
+          POSTGRES_DB: board
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U board -d board"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - name: Integration tests (two server instances behind the Redis adapter)
+        run: npm run test:integration
+      - run: npm run build
+
+  e2e:
+    name: Playwright e2e (two browsers, two instances)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: board
+          POSTGRES_PASSWORD: board
+          POSTGRES_DB: board
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U board -d board"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  scale-profile:
+    name: docker compose --profile scale smoke test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build and start 2 instances behind nginx
+        run: docker compose --profile scale up -d --build --wait
+      - name: Both instances serve traffic through nginx
+        run: |
+          set -euo pipefail
+          curl -fsS http://localhost:8088/health
+          for node in 1 2; do
+            curl -fsS "http://localhost:8088/socket.io/?EIO=4&transport=polling&cid=ci-$node&node=$node" | grep -q '"sid"'
+          done
+          curl -fsS http://localhost:8088/ | grep -q "Realtime Board"
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile scale logs --no-color
