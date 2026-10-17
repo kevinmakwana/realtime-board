@@ -1,7 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyEvents, stateFromSnapshot, SeqBuffer } from '@board/shared';
 import type { ServerInstance } from '../src/server.js';
-import { addCard, collectEvents, createWorld, emit, join, startInstance, startPair, type TestWorld } from './helpers.js';
+import {
+  addCard,
+  collectEvents,
+  createWorld,
+  emit,
+  join,
+  startInstance,
+  startPair,
+  type TestWorld,
+} from './helpers.js';
 
 describe('reconnect catch-up', () => {
   const world: TestWorld = createWorld();
@@ -37,7 +46,12 @@ describe('reconnect catch-up', () => {
 
     // While she is away: 4 more events (a create, an edit, another create and a delete).
     const three = await addCard(writer, snap, 'three');
-    await emit(writer, 'card:update', { id: three.id, boardId: snap.board.id, baseVersion: 1, title: 'three (edited)' });
+    await emit(writer, 'card:update', {
+      id: three.id,
+      boardId: snap.board.id,
+      baseVersion: 1,
+      title: 'three (edited)',
+    });
     const four = await addCard(writer, snap, 'four');
     await emit(writer, 'card:delete', { id: four.id, boardId: snap.board.id, baseVersion: 1 });
 

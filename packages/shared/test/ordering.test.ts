@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { compareOrdered, isValidOrderKey, keyBetween, keyForAppend, keyForIndex, keysBetween, resolveCollision, sortOrdered } from '../src/index.js';
+import {
+  compareOrdered,
+  isValidOrderKey,
+  keyBetween,
+  keyForAppend,
+  keyForIndex,
+  keysBetween,
+  resolveCollision,
+  sortOrdered,
+} from '../src/index.js';
 
 const item = (id: string, position: string) => ({ id, position });
 

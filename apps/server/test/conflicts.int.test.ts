@@ -49,7 +49,11 @@ describe('version conflicts, validation and rate limiting', () => {
     await emit(s, 'card:update', { id, boardId: snap.board.id, baseVersion: 1, description: 'bump' });
 
     const move = await emit(s, 'card:move', {
-      id, boardId: snap.board.id, baseVersion: 1, columnId: snap.columns[1]!.id, position: keyBetween(null, null),
+      id,
+      boardId: snap.board.id,
+      baseVersion: 1,
+      columnId: snap.columns[1]!.id,
+      position: keyBetween(null, null),
     });
     const del = await emit(s, 'card:delete', { id, boardId: snap.board.id, baseVersion: 1 });
     expect(move).toMatchObject({ ok: false, code: 'VERSION_CONFLICT' });
@@ -65,11 +69,21 @@ describe('version conflicts, validation and rate limiting', () => {
     const snap = await world.newBoard(ada.id);
     const s = await world.connect(a.port, ada.token);
     await join(s, snap.board.id);
-    const bad = await emit(s, 'card:create', { id: 'nope', boardId: snap.board.id, columnId: snap.columns[0]!.id, title: '', position: 'a0' } as any);
+    const bad = await emit(s, 'card:create', {
+      id: 'nope',
+      boardId: snap.board.id,
+      columnId: snap.columns[0]!.id,
+      title: '',
+      position: 'a0',
+    } as any);
     expect(bad).toMatchObject({ ok: false, code: 'VALIDATION' });
     expect(bad.message).toMatch(/id/);
     const badKey = await emit(s, 'card:create', {
-      id: randomUUID(), boardId: snap.board.id, columnId: snap.columns[0]!.id, title: 'x', position: '!!!',
+      id: randomUUID(),
+      boardId: snap.board.id,
+      columnId: snap.columns[0]!.id,
+      title: 'x',
+      position: '!!!',
     });
     expect(badKey).toMatchObject({ ok: false, code: 'VALIDATION' });
   });

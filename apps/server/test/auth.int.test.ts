@@ -37,7 +37,9 @@ describe('auth + REST', () => {
 
   it('requires a token for the API, and lets a signed-in user create and fetch a board', async () => {
     expect((await fetch(url('/api/boards'))).status).toBe(401);
-    const login = (await (await post('/api/auth/dev-login', { email: `dev-${Date.now()}@example.test`, name: 'Dev User' })).json()) as {
+    const login = (await (
+      await post('/api/auth/dev-login', { email: `dev-${Date.now()}@example.test`, name: 'Dev User' })
+    ).json()) as {
       token: string;
     };
     const created = await post('/api/boards', { name: 'Roadmap' }, login.token);
@@ -46,7 +48,9 @@ describe('auth + REST', () => {
     expect(snap.columns).toHaveLength(3);
     expect(snap.seq).toBe(0);
 
-    const fetched = await fetch(url(`/api/boards/${snap.board.id}`), { headers: { authorization: `Bearer ${login.token}` } });
+    const fetched = await fetch(url(`/api/boards/${snap.board.id}`), {
+      headers: { authorization: `Bearer ${login.token}` },
+    });
     expect(fetched.status).toBe(200);
     const bad = await post('/api/boards', { name: '' }, login.token);
     expect(bad.status).toBe(400);

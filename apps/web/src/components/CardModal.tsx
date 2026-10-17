@@ -100,7 +100,9 @@ export function CardModal({ card, state, client, editors, onClose }: Props) {
           {comments.map((c) => (
             <li key={c.id}>
               <strong>{c.authorName}</strong>
-              <time dateTime={c.createdAt}>{new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+              <time dateTime={c.createdAt}>
+                {new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </time>
               <p>{c.body}</p>
             </li>
           ))}

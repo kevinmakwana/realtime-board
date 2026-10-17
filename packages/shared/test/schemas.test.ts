@@ -37,11 +37,21 @@ describe('client event schemas', () => {
 
   it('rejects blank titles and oversized comments', () => {
     expect(
-      clientEventSchemas['card:create'].safeParse({ id: uuid, boardId: ids.board, columnId: ids.colA, title: '   ', position: 'a0' })
-        .success,
+      clientEventSchemas['card:create'].safeParse({
+        id: uuid,
+        boardId: ids.board,
+        columnId: ids.colA,
+        title: '   ',
+        position: 'a0',
+      }).success,
     ).toBe(false);
     expect(
-      clientEventSchemas['comment:add'].safeParse({ id: uuid, boardId: ids.board, cardId: ids.card1, body: 'x'.repeat(2001) }).success,
+      clientEventSchemas['comment:add'].safeParse({
+        id: uuid,
+        boardId: ids.board,
+        cardId: ids.card1,
+        body: 'x'.repeat(2001),
+      }).success,
     ).toBe(false);
   });
 
@@ -59,6 +69,8 @@ describe('boardEventSchema', () => {
   });
 
   it('rejects unknown event types', () => {
-    expect(boardEventSchema.safeParse({ ...ev(1, 'card.deleted', { cardId: ids.card1 }), type: 'card.exploded' }).success).toBe(false);
+    expect(
+      boardEventSchema.safeParse({ ...ev(1, 'card.deleted', { cardId: ids.card1 }), type: 'card.exploded' }).success,
+    ).toBe(false);
   });
 });

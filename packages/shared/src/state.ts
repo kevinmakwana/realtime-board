@@ -41,7 +41,11 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
     case 'column.deleted': {
       const { [e.columnId]: _removed, ...columns } = state.columns;
       next.columns = columns;
-      const doomed = new Set(Object.values(state.cards).filter((c) => c.columnId === e.columnId).map((c) => c.id));
+      const doomed = new Set(
+        Object.values(state.cards)
+          .filter((c) => c.columnId === e.columnId)
+          .map((c) => c.id),
+      );
       next.cards = Object.fromEntries(Object.entries(state.cards).filter(([id]) => !doomed.has(id)));
       next.comments = Object.fromEntries(Object.entries(state.comments).filter(([, c]) => !doomed.has(c.cardId)));
       break;

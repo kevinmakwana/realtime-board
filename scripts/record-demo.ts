@@ -127,11 +127,18 @@ async function main() {
   execFileSync(
     ffmpegPath!,
     [
-      '-y', '-loglevel', 'error',
-      '-i', videoOf(1), '-i', videoOf(2),
+      '-y',
+      '-loglevel',
+      'error',
+      '-i',
+      videoOf(1),
+      '-i',
+      videoOf(2),
       '-filter_complex',
       '[0:v][1:v]hstack=inputs=2,fps=10,scale=1280:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=160:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle',
-      '-loop', '0', gif,
+      '-loop',
+      '0',
+      gif,
     ],
     { stdio: 'inherit' },
   );

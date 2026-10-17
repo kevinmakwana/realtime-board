@@ -24,7 +24,8 @@ async function openSharedBoard(browser: import('@playwright/test').Browser) {
   return { ada, grace, close: async () => (await ctxA.close(), await ctxB.close()) };
 }
 
-const names = (page: Page) => page.getByTestId('presence-avatar').evaluateAll((els) => els.map((e) => e.getAttribute('data-name')).sort());
+const names = (page: Page) =>
+  page.getByTestId('presence-avatar').evaluateAll((els) => els.map((e) => e.getAttribute('data-name')).sort());
 
 test('two users on different server instances see each other live', async ({ browser }) => {
   const { ada, grace, close } = await openSharedBoard(browser);
@@ -55,7 +56,9 @@ test('two users on different server instances see each other live', async ({ bro
     await addCard(ada, 'In progress', 'Review pricing page');
     await addCard(ada, 'In progress', 'Record walkthrough');
     await expect(cardsIn(grace, 'In progress')).toHaveCount(3);
-    await card(grace, 'Record walkthrough').dragTo(card(grace, 'Write release notes'), { targetPosition: { x: 40, y: 4 } });
+    await card(grace, 'Record walkthrough').dragTo(card(grace, 'Write release notes'), {
+      targetPosition: { x: 40, y: 4 },
+    });
     const order = ['Record walkthrough', 'Write release notes', 'Review pricing page'];
     await expect(cardsIn(ada, 'In progress')).toHaveText(order.map((t) => new RegExp(t)));
     await expect(cardsIn(grace, 'In progress')).toHaveText(order.map((t) => new RegExp(t)));
@@ -64,7 +67,9 @@ test('two users on different server instances see each other live', async ({ bro
   await test.step('"is editing" indicator appears while Ada edits a card', async () => {
     await card(ada, 'Review pricing page').click();
     await ada.getByLabel('Description').focus();
-    await expect(card(grace, 'Review pricing page').getByTestId('editing-indicator')).toHaveText(/Ada Lovelace is editing/);
+    await expect(card(grace, 'Review pricing page').getByTestId('editing-indicator')).toHaveText(
+      /Ada Lovelace is editing/,
+    );
     await ada.getByLabel('Description').fill('Compare with the three competitors.');
     await ada.getByRole('button', { name: 'Done', exact: true }).click();
     await expect(card(grace, 'Review pricing page').getByTestId('editing-indicator')).toHaveCount(0);
@@ -114,7 +119,10 @@ test('a client that loses its connection catches up on everything it missed', as
   await close();
 });
 
-test('an unauthenticated visitor is sent to sign in, and magic-link tokens are single use', async ({ page, request }) => {
+test('an unauthenticated visitor is sent to sign in, and magic-link tokens are single use', async ({
+  page,
+  request,
+}) => {
   await page.goto(E2E.webA);
   await expect(page.getByRole('heading', { name: 'Realtime Board' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Create link' })).toBeVisible();

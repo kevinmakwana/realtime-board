@@ -66,7 +66,9 @@ export class BoardService {
   /* ---------------- reads ---------------- */
 
   async listBoards(): Promise<Board[]> {
-    const { rows } = await this.pool.query('SELECT id, name, created_at FROM boards ORDER BY created_at DESC LIMIT 100');
+    const { rows } = await this.pool.query(
+      'SELECT id, name, created_at FROM boards ORDER BY created_at DESC LIMIT 100',
+    );
     return rows.map(toBoard);
   }
 

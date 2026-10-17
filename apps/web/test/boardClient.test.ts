@@ -61,7 +61,10 @@ class FakeSocket {
     this.sent.push({ event, payload });
   }
   timeout() {
-    return { emit: (event: string, payload: any, ack: (err: Error | null, a: any) => void) => this.sent.push({ event, payload, ack }) };
+    return {
+      emit: (event: string, payload: any, ack: (err: Error | null, a: any) => void) =>
+        this.sent.push({ event, payload, ack }),
+    };
   }
   disconnect() {
     this.connected = false;
@@ -83,8 +86,7 @@ async function setup(seq = 3) {
   return { socket, client };
 }
 
-const colIds = (client: BoardClient, col: string) =>
-  selectCards(client.getSnapshot().state!, col).map((c) => c.id);
+const colIds = (client: BoardClient, col: string) => selectCards(client.getSnapshot().state!, col).map((c) => c.id);
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -141,7 +143,12 @@ describe('BoardClient', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(client.getSnapshot().state!.cards[uid(101)]!.title).toBe('Mine');
 
-    socket.last('card:update').ack!(null, { ok: false, code: 'VERSION_CONFLICT', message: 'stale', current: card(1, COL_A, 'a0', 2) });
+    socket.last('card:update').ack!(null, {
+      ok: false,
+      code: 'VERSION_CONFLICT',
+      message: 'stale',
+      current: card(1, COL_A, 'a0', 2),
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(client.getSnapshot().state!.cards[uid(101)]!.title).toBe('Card 1');
     expect(notices[0]).toMatch(/Someone else changed that card/);

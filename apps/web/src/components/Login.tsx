@@ -60,7 +60,8 @@ export function Login() {
         <h2>Or get a magic link</h2>
         {sent ? (
           <p role="status" className="note">
-            Link created. Look for it in the server console (this demo prints it instead of sending email), then open it here.
+            Link created. Look for it in the server console (this demo prints it instead of sending email), then open it
+            here.
           </p>
         ) : (
           <form onSubmit={magic} className="row">

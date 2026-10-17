@@ -30,7 +30,10 @@ const cards: Record<string, [string, string][]> = {
     ['Build onboarding checklist', 'Three steps maximum.'],
     ['Record product walkthrough', ''],
   ],
-  Done: [['Finalize pricing page', ''], ['Set up status page', '']],
+  Done: [
+    ['Finalize pricing page', ''],
+    ['Set up status page', ''],
+  ],
 };
 
 const config = loadConfig();
@@ -48,7 +51,13 @@ for (const col of snap.columns) {
   const positions = keysBetween(null, null, items.length);
   for (const [i, [title, description]] of items.entries()) {
     const id = randomUUID();
-    const p: ClientEventPayload<'card:create'> = { id, boardId: snap.board.id, columnId: col.id, title, position: positions[i]! };
+    const p: ClientEventPayload<'card:create'> = {
+      id,
+      boardId: snap.board.id,
+      columnId: col.id,
+      title,
+      position: positions[i]!,
+    };
     await service.createCard(owner.id, p);
     if (description) {
       await service.updateCard(owner.id, { id, boardId: snap.board.id, baseVersion: 1, description });
