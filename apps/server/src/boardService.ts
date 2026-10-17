@@ -207,8 +207,7 @@ export class BoardService {
   async createColumn(actorId: string, p: ClientEventPayload<'column:create'>): Promise<CommitResult> {
     if (!isValidOrderKey(p.position)) throw new ServiceError('VALIDATION', 'Invalid position key');
     return this.commit(p.boardId, actorId, async (tx) => {
-      const existing = await tx.query('SELECT 1 FROM columns WHERE id = $1', [p.id]);
-      if (existing.rowCount) return null; // idempotent retry
+      if (await this.isRetry(tx, 'columns', p.id, p.boardId)) return null; // idempotent retry
       const sibs = await tx.query('SELECT id, position FROM columns WHERE board_id = $1', [p.boardId]);
       const position = resolveCollision(p.position, sibs.rows as { id: string; position: string }[]);
       const { rows } = await tx.query(
@@ -242,8 +241,7 @@ export class BoardService {
   async createCard(actorId: string, p: ClientEventPayload<'card:create'>): Promise<CommitResult> {
     if (!isValidOrderKey(p.position)) throw new ServiceError('VALIDATION', 'Invalid position key');
     return this.commit(p.boardId, actorId, async (tx) => {
-      const existing = await tx.query('SELECT version FROM cards WHERE id = $1', [p.id]);
-      if (existing.rowCount) return null; // idempotent retry
+      if (await this.isRetry(tx, 'cards', p.id, p.boardId)) return null; // idempotent retry
       const col = await tx.query('SELECT 1 FROM columns WHERE id = $1 AND board_id = $2', [p.columnId, p.boardId]);
       if (!col.rowCount) throw new ServiceError('NOT_FOUND', 'Column not found');
       const position = await this.freePosition(tx, p.columnId, p.position, null);
@@ -296,8 +294,7 @@ export class BoardService {
 
   async addComment(actorId: string, p: ClientEventPayload<'comment:add'>): Promise<CommitResult> {
     return this.commit(p.boardId, actorId, async (tx) => {
-      const dup = await tx.query('SELECT 1 FROM comments WHERE id = $1', [p.id]);
-      if (dup.rowCount) return null;
+      if (await this.isRetry(tx, 'comments', p.id, p.boardId)) return null; // idempotent retry
       const card = await tx.query('SELECT 1 FROM cards WHERE id = $1 AND board_id = $2', [p.cardId, p.boardId]);
       if (!card.rowCount) throw new ServiceError('NOT_FOUND', 'Card not found');
       const { rows } = await tx.query(
@@ -311,6 +308,23 @@ export class BoardService {
   }
 
   /* ---------------- helpers ---------------- */
+
+  /**
+   * Client-generated ids make create commands safe to retry: seeing the id again on the same board
+   * means the earlier attempt landed, so the retry is a no-op. The same id on a *different* board
+   * is not a retry, so it is refused instead of being reported as a success that never happened.
+   */
+  private async isRetry(
+    tx: Tx,
+    table: 'columns' | 'cards' | 'comments',
+    id: string,
+    boardId: string,
+  ): Promise<boolean> {
+    const { rows } = await tx.query(`SELECT board_id FROM ${table} WHERE id = $1`, [id]);
+    if (!rows[0]) return false;
+    if (rows[0].board_id !== boardId) throw new ServiceError('VALIDATION', 'That id is already in use');
+    return true;
+  }
 
   /**
    * Version check (last-writer-wins, but only against the version the client actually saw).
