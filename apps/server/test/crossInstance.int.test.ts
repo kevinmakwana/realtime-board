@@ -2,16 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { keyBetween } from '@board/shared';
 import type { ServerInstance } from '../src/server.js';
-import {
-  addCard,
-  collectEvents,
-  createWorld,
-  emit,
-  join,
-  startInstance,
-  startPair,
-  type TestWorld,
-} from './helpers.js';
+import { addCard, collectEvents, createWorld, emit, join, startPair, type TestWorld } from './helpers.js';
 
 describe('cross-instance broadcast (Redis adapter)', () => {
   const world: TestWorld = createWorld();

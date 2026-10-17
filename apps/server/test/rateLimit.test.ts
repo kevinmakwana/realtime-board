@@ -3,7 +3,7 @@ import { TokenBucket } from '../src/rateLimit.js';
 
 describe('TokenBucket', () => {
   it('allows a burst up to capacity then rejects', () => {
-    let t = 0;
+    const t = 0;
     const b = new TokenBucket(3, 1, () => t);
     expect([b.take(), b.take(), b.take(), b.take()]).toEqual([true, true, true, false]);
   });

@@ -42,11 +42,12 @@ export function CardModal({ card, state, client, editors, onClose }: Props) {
   const blur = () => client.setEditing(null);
 
   return (
-    <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is a mouse shortcut; keyboard users close with Escape (BoardView)
+    <div className="scrim" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Card details">
         <header className="modal-head">
           <span className="in-column">in {column?.name ?? 'column'}</span>
-          <button className="icon-btn" aria-label="Close" onClick={onClose}>
+          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
             ×
           </button>
         </header>
@@ -59,7 +60,7 @@ export function CardModal({ card, state, client, editors, onClose }: Props) {
         {remoteChanged && (
           <p className="warn" role="alert">
             Someone saved changes to this card.{' '}
-            <button className="link" onClick={reloadFromServer}>
+            <button type="button" className="link" onClick={reloadFromServer}>
               Load their version
             </button>{' '}
             (your unsaved text will be replaced) or save yours to overwrite.
@@ -125,11 +126,14 @@ export function CardModal({ card, state, client, editors, onClose }: Props) {
             onFocus={focus}
             onBlur={blur}
           />
-          <button className="btn primary">Comment</button>
+          <button type="submit" className="btn primary">
+            Comment
+          </button>
         </form>
 
         <footer className="modal-foot">
           <button
+            type="button"
             className="btn danger"
             onClick={() => {
               client.deleteCard(card.id);
@@ -138,7 +142,14 @@ export function CardModal({ card, state, client, editors, onClose }: Props) {
           >
             Delete card
           </button>
-          <button className="btn" onClick={() => (save(), onClose())}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              save();
+              onClose();
+            }}
+          >
             Done
           </button>
         </footer>

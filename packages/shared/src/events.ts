@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
   LIMITS,
-  boardSnapshotSchema,
+  type boardSnapshotSchema,
   cardSchema,
   columnSchema,
   commentSchema,

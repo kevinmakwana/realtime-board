@@ -41,7 +41,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run lint
       - run: npm run typecheck
+      - name: Audit production dependencies (fails on high or critical)
+        run: npm run audit:prod
       - run: npm run test:unit
       - name: Integration tests (two server instances behind the Redis adapter)
         run: npm run test:integration
