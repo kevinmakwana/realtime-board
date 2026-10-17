@@ -144,7 +144,12 @@ export class BoardClient {
     this.model = {
       ...this.model,
       ...patch,
-      state: this.auth ? applyPending(this.auth, this.pending.map((p) => p.op)) : null,
+      state: this.auth
+        ? applyPending(
+            this.auth,
+            this.pending.map((p) => p.op),
+          )
+        : null,
       cursors: [...this.cursors.values()],
       selfSocketId: this.socket.id ?? null,
     };
@@ -168,7 +173,10 @@ export class BoardClient {
     const lastSeq = this.auth ? this.buffer.seq : undefined;
     let ack: JoinAck;
     try {
-      ack = (await this.emitAck('board:join', { boardId: this.boardId, ...(lastSeq !== undefined && { lastSeq }) })) as JoinAck;
+      ack = (await this.emitAck('board:join', {
+        boardId: this.boardId,
+        ...(lastSeq !== undefined && { lastSeq }),
+      })) as JoinAck;
     } catch {
       this.update({ status: 'reconnecting' });
       return;
@@ -222,7 +230,9 @@ export class BoardClient {
     return new Promise((resolve, reject) => {
       (this.socket as unknown as { timeout(ms: number): { emit: (...a: unknown[]) => void } })
         .timeout(ACK_TIMEOUT_MS)
-        .emit(event, payload, (err: Error | null, ack: Ack<Record<string, unknown>>) => (err ? reject(err) : resolve(ack)));
+        .emit(event, payload, (err: Error | null, ack: Ack<Record<string, unknown>>) =>
+          err ? reject(err) : resolve(ack),
+        );
     });
   }
 
@@ -231,7 +241,12 @@ export class BoardClient {
    * is based on the version the previous one produced (otherwise a user editing then moving a card
    * quickly would conflict with themselves).
    */
-  private submit(op: PendingOp, chainKey: string, send: () => Promise<Ack<Record<string, unknown>>>, cardId?: string): void {
+  private submit(
+    op: PendingOp,
+    chainKey: string,
+    send: () => Promise<Ack<Record<string, unknown>>>,
+    cardId?: string,
+  ): void {
     if (!this.joined || !this.auth) {
       this.notice('info', 'You are offline. Changes resume when the connection returns.');
       return;
@@ -261,7 +276,10 @@ export class BoardClient {
     }
     // Rejected: rolling back is just removing the optimistic op.
     this.drop(entry);
-    this.notice('error', ack.code === 'VERSION_CONFLICT' ? 'Someone else changed that card first. Showing their version.' : ack.message);
+    this.notice(
+      'error',
+      ack.code === 'VERSION_CONFLICT' ? 'Someone else changed that card first. Showing their version.' : ack.message,
+    );
     if (ack.code === 'VERSION_CONFLICT' || ack.code === 'NOT_FOUND') void this.join();
   }
 
@@ -297,7 +315,14 @@ export class BoardClient {
     this.submit(
       { kind: 'card.create', card },
       card.id,
-      () => this.emitAck('card:create', { id: card.id, boardId: this.boardId, columnId, title: card.title, position: card.position }),
+      () =>
+        this.emitAck('card:create', {
+          id: card.id,
+          boardId: this.boardId,
+          columnId,
+          title: card.title,
+          position: card.position,
+        }),
       card.id,
     );
   }
@@ -320,7 +345,8 @@ export class BoardClient {
     this.submit(
       { kind: 'card.move', id, columnId, position },
       id,
-      () => this.emitAck('card:move', { id, boardId: this.boardId, baseVersion: this.baseVersion(id), columnId, position }),
+      () =>
+        this.emitAck('card:move', { id, boardId: this.boardId, baseVersion: this.baseVersion(id), columnId, position }),
       id,
     );
   }
@@ -343,10 +369,13 @@ export class BoardClient {
       position: keyForAppend(selectColumns(state)),
     };
     if (!column.name) return;
-    this.submit(
-      { kind: 'column.create', column },
-      'board',
-      () => this.emitAck('column:create', { id: column.id, boardId: this.boardId, name: column.name, position: column.position }),
+    this.submit({ kind: 'column.create', column }, 'board', () =>
+      this.emitAck('column:create', {
+        id: column.id,
+        boardId: this.boardId,
+        name: column.name,
+        position: column.position,
+      }),
     );
   }
 
@@ -358,7 +387,9 @@ export class BoardClient {
   }
 
   deleteColumn(id: string): void {
-    this.submit({ kind: 'column.delete', id }, 'board', () => this.emitAck('column:delete', { id, boardId: this.boardId }));
+    this.submit({ kind: 'column.delete', id }, 'board', () =>
+      this.emitAck('column:delete', { id, boardId: this.boardId }),
+    );
   }
 
   addComment(cardId: string, body: string): void {

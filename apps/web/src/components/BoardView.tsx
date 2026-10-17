@@ -63,7 +63,11 @@ export function BoardView({ client, vm, state, session }: Props) {
           title={vm.instance ? `Connected to ${vm.instance}` : undefined}
         >
           <span className="dot" />
-          {vm.status === 'live' ? `Live on ${vm.instance}` : vm.status === 'unauthorized' ? 'Signed out' : 'Reconnecting…'}
+          {vm.status === 'live'
+            ? `Live on ${vm.instance}`
+            : vm.status === 'unauthorized'
+              ? 'Signed out'
+              : 'Reconnecting…'}
         </span>
       </header>
 

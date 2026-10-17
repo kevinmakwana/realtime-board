@@ -8,8 +8,7 @@ import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing';
  * Keys are compared as plain strings (byte order) - use `compareOrdered`.
  */
 export const keyBetween = (a: string | null, b: string | null): string => generateKeyBetween(a, b);
-export const keysBetween = (a: string | null, b: string | null, n: number): string[] =>
-  generateNKeysBetween(a, b, n);
+export const keysBetween = (a: string | null, b: string | null, n: number): string[] => generateNKeysBetween(a, b, n);
 
 export function isValidOrderKey(key: string): boolean {
   try {

@@ -17,13 +17,16 @@ import { createServerInstance, type ServerInstance } from '../src/server.js';
 
 export type ClientSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
-export const baseConfig = (over: Partial<Config> = {}): Config =>
-  loadConfig(process.env, { PORT: 0, ...over });
+export const baseConfig = (over: Partial<Config> = {}): Config => loadConfig(process.env, { PORT: 0, ...over });
 
 export const startInstance = (id: string, over: Partial<Config> = {}): Promise<ServerInstance> =>
   createServerInstance(baseConfig({ INSTANCE_ID: id, ...over }));
 
-export async function startPair(a: string, b: string, over: Partial<Config> = {}): Promise<[ServerInstance, ServerInstance]> {
+export async function startPair(
+  a: string,
+  b: string,
+  over: Partial<Config> = {},
+): Promise<[ServerInstance, ServerInstance]> {
   return Promise.all([startInstance(a, over), startInstance(b, over)]);
 }
 
@@ -99,8 +102,19 @@ export function collectEvents(socket: ClientSocket): BoardEvent[] {
   return events;
 }
 
-export async function addCard(socket: ClientSocket, snap: BoardSnapshot, title: string, position = keyBetween(null, null)) {
+export async function addCard(
+  socket: ClientSocket,
+  snap: BoardSnapshot,
+  title: string,
+  position = keyBetween(null, null),
+) {
   const id = randomUUID();
-  const ack = await emit(socket, 'card:create', { id, boardId: snap.board.id, columnId: snap.columns[0]!.id, title, position });
+  const ack = await emit(socket, 'card:create', {
+    id,
+    boardId: snap.board.id,
+    columnId: snap.columns[0]!.id,
+    title,
+    position,
+  });
   return { id, ack };
 }

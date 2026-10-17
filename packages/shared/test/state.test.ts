@@ -38,7 +38,15 @@ describe('applyEvent', () => {
     s = applyEvent(
       s,
       ev(5, 'comment.added', {
-        comment: { id: ids.card3, boardId: ids.board, cardId: ids.card1, authorId: ids.user, authorName: 'Ada', body: 'hi', createdAt: 'x' },
+        comment: {
+          id: ids.card3,
+          boardId: ids.board,
+          cardId: ids.card1,
+          authorId: ids.user,
+          authorName: 'Ada',
+          body: 'hi',
+          createdAt: 'x',
+        },
       }),
     );
     s = applyEvent(s, ev(6, 'column.deleted', { columnId: ids.colA }));

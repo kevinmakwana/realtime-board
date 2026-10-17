@@ -2,7 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { keyBetween } from '@board/shared';
 import type { ServerInstance } from '../src/server.js';
-import { addCard, collectEvents, createWorld, emit, join, startInstance, startPair, type TestWorld } from './helpers.js';
+import {
+  addCard,
+  collectEvents,
+  createWorld,
+  emit,
+  join,
+  startInstance,
+  startPair,
+  type TestWorld,
+} from './helpers.js';
 
 describe('cross-instance broadcast (Redis adapter)', () => {
   const world: TestWorld = createWorld();
@@ -56,14 +65,14 @@ describe('cross-instance broadcast (Redis adapter)', () => {
     // Grace starts editing a card; Ada (other instance) must see the indicator.
     const { id: cardId } = await addCard(onB, snap, 'Shared card');
     await emit(onB, 'presence:editing', { boardId: snap.board.id, cardId });
-    await expect
-      .poll(() => presenceOnA.at(-1), { timeout: 5000 })
-      .toEqual(['Ada@instance-a', 'Grace@instance-b']);
+    await expect.poll(() => presenceOnA.at(-1), { timeout: 5000 }).toEqual(['Ada@instance-a', 'Grace@instance-b']);
 
     let lastMembers: any;
     onA.on('presence:update', (p) => (lastMembers = p.members));
     await emit(onB, 'presence:editing', { boardId: snap.board.id, cardId });
-    await expect.poll(() => lastMembers?.find((m: any) => m.user.name === 'Grace')?.editingCardId, { timeout: 5000 }).toBe(cardId);
+    await expect
+      .poll(() => lastMembers?.find((m: any) => m.user.name === 'Grace')?.editingCardId, { timeout: 5000 })
+      .toBe(cardId);
 
     onB.emit('presence:cursor', { boardId: snap.board.id, x: 0.25, y: 0.75 });
     await expect.poll(() => cursors.length, { timeout: 5000 }).toBeGreaterThan(0);
@@ -81,8 +90,9 @@ describe('cross-instance broadcast (Redis adapter)', () => {
     const seen = collectEvents(onA);
 
     const acks = await Promise.all(
-      Array.from({ length: 24 }, (_, i) =>
-        addCard(i % 2 ? onA : onB, snap, `Card ${i}`, keyBetween(null, null)), // all want the SAME position
+      Array.from(
+        { length: 24 },
+        (_, i) => addCard(i % 2 ? onA : onB, snap, `Card ${i}`, keyBetween(null, null)), // all want the SAME position
       ),
     );
     expect(acks.every((r) => r.ack.ok)).toBe(true);

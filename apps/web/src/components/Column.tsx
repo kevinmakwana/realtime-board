@@ -91,7 +91,8 @@ export function Column({ column, state, client, draggingId, setDraggingId, edito
           aria-label={`Delete column ${column.name}`}
           title="Delete column"
           onClick={() => {
-            if (window.confirm(`Delete "${column.name}" and its ${cards.length} card(s)?`)) client.deleteColumn(column.id);
+            if (window.confirm(`Delete "${column.name}" and its ${cards.length} card(s)?`))
+              client.deleteColumn(column.id);
           }}
         >
           ×

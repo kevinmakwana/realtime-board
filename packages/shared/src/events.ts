@@ -30,11 +30,7 @@ export type BoardEvent = z.infer<typeof boardEventSchema>;
 export type BoardEventType = BoardEvent['type'];
 
 /** Event as stored in the log, before a sequence number is assigned. */
-export type NewBoardEvent = BoardEvent extends infer E
-  ? E extends BoardEvent
-    ? Omit<E, 'seq' | 'ts'>
-    : never
-  : never;
+export type NewBoardEvent = BoardEvent extends infer E ? (E extends BoardEvent ? Omit<E, 'seq' | 'ts'> : never) : never;
 
 /* ------------------------------------------------------------------ */
 /* Client -> server: commands (each acknowledged)                      */
