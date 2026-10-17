@@ -88,6 +88,7 @@ Host ports are configurable: `POSTGRES_PORT`, `REDIS_PORT`, `NGINX_PORT` (see [`
 ### Tests
 
 ```bash
+npm run lint                 # Biome: lint + format check (npm run lint:fix to fix, npm run format to format)
 npm run typecheck
 npm run test:unit            # schemas, ordering, reducer, sequence buffer, client engine, rate limiter
 npm run test:integration     # needs `npm run infra:up`; starts TWO server instances on one Redis
@@ -151,7 +152,7 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/auth/dev-login` | `{ email, name? }` returns a JWT. Disabled when `NODE_ENV=production` unless `AUTH_DEV_LOGIN=true`. |
+| `POST /api/auth/dev-login` | `{ email, name? }` returns a JWT. Disabled when `NODE_ENV=production` unless `AUTH_DEV_LOGIN=true`. All `/api/auth/*` routes answer `429` with `Retry-After` when rate limited. |
 | `POST /api/auth/magic-link` | `{ email }` prints a single-use link to the server console. |
 | `POST /api/auth/verify` | `{ token }` exchanges a magic-link token for a JWT. |
 | `GET /api/boards`, `POST /api/boards` | List or create boards (new boards get To do, In progress, Done). |
@@ -168,6 +169,7 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 - **Sticky sessions.** Socket.IO's long-polling handshake needs every request of a session on one instance, even with the Redis adapter. The web app adds a random per-tab `cid` to every Socket.IO request and nginx does `hash $arg_cid consistent`. Hashing on `$remote_addr` would pin every local tab to one instance. `?node=1|2` overrides this for demos. `proxy_read_timeout` is 120 s, above Socket.IO's 25 s ping interval plus 20 s ping timeout.
 - **Presence.** Each socket has a Redis key with a TTL (default 30 s) and an entry in a per-board sorted set. Instances refresh the keys of their own sockets every TTL/3. If a client or a whole instance dies, its keys expire, `list()` prunes the dangling index entries, and surviving instances notice the roster changed on their next heartbeat and rebroadcast it.
 - **Rate limiting.** One token bucket per socket for commands (default 20/s sustained, burst 40) and a separate one for cursors (30/s). A noisy socket gets `RATE_LIMITED` acks and does not affect others. The limits are per instance process, which is per socket, so they do not need Redis.
+- **HTTP hardening.** `/api/auth/*` is rate limited per client IP, and magic links are also limited per email address. Both limiters count in Redis, so the budget is shared by every instance, and they fail open if Redis is unreachable. Helmet sets the standard security headers. Set `TRUST_PROXY` to the number of proxies in front of the server (the compose profile uses 1); leaving it at 0 means a spoofed `X-Forwarded-For` cannot dodge a limit.
 - **Throttling on the client.** Cursor packets go out at most every 50 ms and always end on the latest position.
 - **Known limits.** Any signed-in user can open any board (this is a demo, there is no sharing model). The event log is never compacted. Comments are loaded with the snapshot, which is fine for small boards but would need paging for large ones.
 
@@ -189,7 +191,11 @@ docker/         nginx config for the scale profile
 | `INSTANCE_ID` | `server-1` | Shown in the UI and `/health` |
 | `DATABASE_URL` | `postgres://board:board@localhost:5434/board` | |
 | `REDIS_URL` | `redis://localhost:6381` | |
-| `JWT_SECRET` | `dev-only-change-me` | Change it for anything beyond local use |
+| `JWT_SECRET` | `dev-only-change-me` | The server refuses to start with this value when `NODE_ENV=production` |
+| `COMPOSE_JWT_SECRET` | demo value | Compose only: the secret used by the `scale` profile (it runs with `NODE_ENV=production`) |
+| `TRUST_PROXY` | `0` | Number of reverse proxies in front of the server (nginx = 1). Needed for per-client rate limits to see real IPs |
+| `AUTH_RATE_LIMIT_PER_MIN` | `20` | Requests per client IP per minute across `/api/auth/*` |
+| `MAGIC_LINK_PER_EMAIL_PER_HOUR` | `5` | Magic links one address can be sent per hour |
 | `PRESENCE_TTL_SECONDS` | `30` | |
 | `RATE_LIMIT_PER_SEC` / `RATE_LIMIT_BURST` | `20` / `40` | Commands per socket |
 | `CURSOR_RATE_PER_SEC` | `30` | |

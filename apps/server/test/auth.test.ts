@@ -26,7 +26,8 @@ describe('helpers', () => {
 describe('config', () => {
   it('has dev defaults and disables dev login in production', () => {
     expect(loadConfig({}).AUTH_DEV_LOGIN).toBe(true);
-    expect(loadConfig({ NODE_ENV: 'production' }).AUTH_DEV_LOGIN).toBe(false);
-    expect(loadConfig({ NODE_ENV: 'production', AUTH_DEV_LOGIN: 'true' }).AUTH_DEV_LOGIN).toBe(true);
+    const prod = { NODE_ENV: 'production', JWT_SECRET: 'a-private-production-secret' };
+    expect(loadConfig(prod).AUTH_DEV_LOGIN).toBe(false);
+    expect(loadConfig({ ...prod, AUTH_DEV_LOGIN: 'true' }).AUTH_DEV_LOGIN).toBe(true);
   });
 });
