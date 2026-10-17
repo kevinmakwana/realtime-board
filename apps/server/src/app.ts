@@ -1,4 +1,5 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
+import helmet from 'helmet';
 import { z } from 'zod';
 import { LIMITS } from '@board/shared';
 import type { Redis } from 'ioredis';
@@ -6,6 +7,7 @@ import { consumeMagicToken, createMagicLink, signToken, upsertUser, verifyToken 
 import type { BoardService } from './boardService.js';
 import type { Config } from './config.js';
 import type { Pool } from './db.js';
+import { redisRateLimit } from './httpRateLimit.js';
 import type { Logger } from './logger.js';
 
 interface Deps {
@@ -30,6 +32,9 @@ class HttpError extends Error {
 export function createApp({ config, pool, redis, service, log }: Deps) {
   const app = express();
   app.disable('x-powered-by');
+  // Without this, req.ip is the proxy's address and every client would share one rate-limit budget.
+  app.set('trust proxy', config.TRUST_PROXY);
+  app.use(helmet());
   app.use(express.json({ limit: '32kb' }));
 
   app.get('/health', (_req, res) => {
@@ -40,6 +45,18 @@ export function createApp({ config, pool, redis, service, log }: Deps) {
 
   const api = express.Router();
 
+  // Sign-in routes are unauthenticated, so they are the ones worth brute-forcing or spamming.
+  api.use(
+    '/auth',
+    redisRateLimit(redis, {
+      name: 'auth',
+      limit: config.AUTH_RATE_LIMIT_PER_MIN,
+      windowSeconds: 60,
+      key: (req) => req.ip ?? 'unknown',
+      log,
+    }),
+  );
+
   // Dev login: any email gets a JWT. Disabled in production unless explicitly enabled.
   api.post('/auth/dev-login', async (req, res) => {
     if (!config.AUTH_DEV_LOGIN) throw new HttpError(404, 'Dev login is disabled');
@@ -49,7 +66,17 @@ export function createApp({ config, pool, redis, service, log }: Deps) {
   });
 
   // Magic link: the "email" is printed to the server console instead of being sent.
-  api.post('/auth/magic-link', async (req, res) => {
+  const magicLinkPerEmail = redisRateLimit(redis, {
+    name: 'magic-link',
+    limit: config.MAGIC_LINK_PER_EMAIL_PER_HOUR,
+    windowSeconds: 60 * 60,
+    key: (req) => {
+      const parsed = emailSchema.safeParse(req.body);
+      return parsed.success ? parsed.data.email.trim().toLowerCase() : undefined;
+    },
+    log,
+  });
+  api.post('/auth/magic-link', magicLinkPerEmail, async (req, res) => {
     const { email } = emailSchema.parse(req.body);
     const link = await createMagicLink(redis, email, config.WEB_ORIGIN);
     log(`\n  ✉  Magic link for ${email}\n     ${link}\n`);
