@@ -248,7 +248,7 @@ export class BoardClient {
     cardId?: string,
   ): void {
     if (!this.joined || !this.auth) {
-      this.notice('info', 'You are offline. Changes resume when the connection returns.');
+      this.notice('error', 'You are offline, so that change was not saved. Try again once you are reconnected.');
       return;
     }
     const entry: PendingEntry = { id: this.nextId++, op };
@@ -420,7 +420,10 @@ export class BoardClient {
     if (!this.joined) return;
     this.queuedCursor = { x: clamp01(x), y: clamp01(y) };
     const wait = this.lastCursorSent + CURSOR_SEND_INTERVAL_MS - Date.now();
-    if (wait <= 0) return this.flushCursor();
+    if (wait <= 0) {
+      this.flushCursor();
+      return;
+    }
     this.cursorTimer ??= setTimeout(() => this.flushCursor(), wait);
   }
 
