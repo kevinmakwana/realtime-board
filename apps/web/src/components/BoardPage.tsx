@@ -42,7 +42,7 @@ function ConnectedBoard({ client, session }: { client: BoardClient; session: Ses
     return (
       <div className="page center">
         <p role="status">{vm.status === 'reconnecting' ? 'Reconnecting…' : 'Opening board…'}</p>
-        <button className="btn ghost" onClick={() => navigate('/')}>
+        <button type="button" className="btn ghost" onClick={() => navigate('/')}>
           Back to boards
         </button>
       </div>

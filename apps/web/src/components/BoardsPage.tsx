@@ -37,7 +37,7 @@ export function BoardsPage({ session }: { session: Session }) {
           </span>
           {session.user.name}
         </span>
-        <button className="btn ghost" onClick={() => setSession(null)}>
+        <button type="button" className="btn ghost" onClick={() => setSession(null)}>
           Sign out
         </button>
       </header>
@@ -51,7 +51,9 @@ export function BoardsPage({ session }: { session: Session }) {
             maxLength={80}
             onChange={(e) => setName(e.target.value)}
           />
-          <button className="btn primary">Create board</button>
+          <button type="submit" className="btn primary">
+            Create board
+          </button>
         </form>
         {error && (
           <p role="alert" className="error">

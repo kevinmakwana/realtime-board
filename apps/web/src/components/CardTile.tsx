@@ -18,10 +18,16 @@ export function CardTile({ card, dragging, commentCount, editors, onOpen, onDrag
       data-card-id={card.id}
       data-testid="card"
       draggable
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: the card is a focusable control; Enter and Space open it (onKeyDown below)
       tabIndex={0}
       style={editing ? ({ '--editor': editing.color } as React.CSSProperties) : undefined}
       onClick={onOpen}
-      onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onOpen())}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       onDragStart={(e) => {
         e.dataTransfer.setData('text/plain', card.id);
         e.dataTransfer.effectAllowed = 'move';

@@ -73,6 +73,7 @@ export function Column({ column, state, client, draggingId, setDraggingId, edito
             />
           </form>
         ) : (
+          // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard rename is tracked in TASKS.md (Phase 4, touch/keyboard + ARIA pass)
           <h2
             title="Click to rename"
             onClick={() => {
@@ -83,10 +84,11 @@ export function Column({ column, state, client, draggingId, setDraggingId, edito
             {column.name}
           </h2>
         )}
-        <span className="count" aria-label={`${cards.length} cards`}>
+        <span className="count" role="img" aria-label={`${cards.length} cards`}>
           {cards.length}
         </span>
         <button
+          type="button"
           className="icon-btn"
           aria-label={`Delete column ${column.name}`}
           title="Delete column"
@@ -165,14 +167,16 @@ export function Column({ column, state, client, draggingId, setDraggingId, edito
             }}
           />
           <div className="row">
-            <button className="btn primary">Add card</button>
+            <button type="submit" className="btn primary">
+              Add card
+            </button>
             <button type="button" className="btn ghost" onClick={() => setAdding(false)}>
               Done
             </button>
           </div>
         </form>
       ) : (
-        <button className="btn ghost add-card" onClick={() => setAdding(true)}>
+        <button type="button" className="btn ghost add-card" onClick={() => setAdding(true)}>
           + Add card
         </button>
       )}

@@ -50,7 +50,7 @@ export function BoardView({ client, vm, state, session }: Props) {
   return (
     <div className="page board-page">
       <header className="topbar">
-        <button className="btn ghost back" onClick={() => navigate('/')} aria-label="Back to boards">
+        <button type="button" className="btn ghost back" onClick={() => navigate('/')} aria-label="Back to boards">
           Boards
         </button>
         <h1 className="board-title">{state.board.name}</h1>
@@ -106,14 +106,16 @@ export function BoardView({ client, vm, state, session }: Props) {
                   onKeyDown={(e) => e.key === 'Escape' && setAddingColumn(false)}
                 />
                 <div className="row">
-                  <button className="btn primary">Add column</button>
+                  <button type="submit" className="btn primary">
+                    Add column
+                  </button>
                   <button type="button" className="btn ghost" onClick={() => setAddingColumn(false)}>
                     Cancel
                   </button>
                 </div>
               </form>
             ) : (
-              <button className="btn ghost add-column" onClick={() => setAddingColumn(true)}>
+              <button type="button" className="btn ghost add-column" onClick={() => setAddingColumn(true)}>
                 + Add column
               </button>
             )}

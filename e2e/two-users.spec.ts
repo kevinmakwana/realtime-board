@@ -21,7 +21,14 @@ async function openSharedBoard(browser: import('@playwright/test').Browser) {
   await signInAs(grace, E2E.webB, 'Grace Hopper');
   await grace.goto(`${E2E.webB}${path}`);
   await expect(grace.getByTestId('lanes')).toBeVisible();
-  return { ada, grace, close: async () => (await ctxA.close(), await ctxB.close()) };
+  return {
+    ada,
+    grace,
+    close: async () => {
+      await ctxA.close();
+      await ctxB.close();
+    },
+  };
 }
 
 const names = (page: Page) =>

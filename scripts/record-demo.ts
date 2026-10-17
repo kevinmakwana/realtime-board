@@ -32,7 +32,7 @@ async function glide(page: Page, x: number, y: number, steps = 18) {
   await page.mouse.move(x, y, { steps });
 }
 
-async function center(page: Page, selector: ReturnType<Page['locator']>) {
+async function center(_page: Page, selector: ReturnType<Page['locator']>) {
   const box = (await selector.boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }

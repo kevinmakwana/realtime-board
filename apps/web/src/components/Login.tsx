@@ -51,7 +51,13 @@ export function Login() {
         <h2>Sign in as a demo person</h2>
         <div className="personas">
           {PERSONAS.map((p) => (
-            <button key={p.email} className="btn" disabled={busy} onClick={() => void devLogin(p.email, p.name)}>
+            <button
+              type="button"
+              key={p.email}
+              className="btn"
+              disabled={busy}
+              onClick={() => void devLogin(p.email, p.name)}
+            >
               {p.name}
             </button>
           ))}
@@ -73,7 +79,7 @@ export function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <button className="btn primary" disabled={busy}>
+            <button type="submit" className="btn primary" disabled={busy}>
               Create link
             </button>
           </form>
@@ -114,7 +120,7 @@ export function VerifyMagicLink() {
             <p role="alert" className="error">
               {error}
             </p>
-            <button className="btn primary" onClick={() => navigate('/')}>
+            <button type="button" className="btn primary" onClick={() => navigate('/')}>
               Back to sign in
             </button>
           </>
