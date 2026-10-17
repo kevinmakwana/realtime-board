@@ -222,6 +222,19 @@ describe('BoardClient', () => {
     expect(notices[0]).toMatch(/offline/i);
   });
 
+  it('tells the user an offline change was not saved instead of promising it will resume', async () => {
+    const { socket, client } = await setup();
+    const notices: { kind: string; message: string }[] = [];
+    client.onNotice((n) => notices.push(n));
+    socket.fire('disconnect');
+    client.createCard(COL_A, 'Offline card');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.kind).toBe('error');
+    expect(notices[0]?.message).toMatch(/not saved/i);
+    expect(notices[0]?.message).not.toMatch(/resume/i);
+    expect(socket.count('card:create')).toBe(0);
+  });
+
   it('throttles cursor packets and always sends the latest position', async () => {
     const { socket, client } = await setup();
     for (let i = 1; i <= 10; i++) client.sendCursor(i / 10, 0.5);
