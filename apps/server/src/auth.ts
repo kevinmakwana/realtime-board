@@ -45,7 +45,16 @@ export async function upsertUser(pool: Pool, email: string, name?: string): Prom
      RETURNING id, email, name, color`,
     [randomUUID(), normalized, name ?? nameFromEmail(normalized), colorFor(normalized), name ?? null],
   );
-  return rows[0]!;
+  const user = rows[0]!;
+  // Pending invites for this address become memberships. Every sign-in path goes through here.
+  await pool.query(
+    `WITH claimed AS (DELETE FROM board_invites WHERE email = $1 RETURNING board_id, role)
+     INSERT INTO board_members (board_id, user_id, role)
+     SELECT board_id, $2, role FROM claimed
+     ON CONFLICT (board_id, user_id) DO NOTHING`,
+    [normalized, user.id],
+  );
+  return user;
 }
 
 const MAGIC_TTL_SECONDS = 15 * 60;
