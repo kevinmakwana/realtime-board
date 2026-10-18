@@ -127,3 +127,22 @@ export async function addCard(
   });
   return { id, ack };
 }
+
+/** Resolves with the first payload of `event` that satisfies `predicate`, or rejects after `ms`. */
+export function waitFor<E extends keyof ServerToClientEvents>(
+  socket: ClientSocket,
+  event: E,
+  predicate: (payload: Parameters<ServerToClientEvents[E]>[0]) => boolean = () => true,
+  ms = 5000,
+): Promise<Parameters<ServerToClientEvents[E]>[0]> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timed out waiting for ${String(event)}`)), ms);
+    const handler = (payload: any) => {
+      if (!predicate(payload)) return;
+      clearTimeout(timer);
+      (socket as any).off(event, handler);
+      resolve(payload);
+    };
+    (socket as any).on(event, handler);
+  });
+}

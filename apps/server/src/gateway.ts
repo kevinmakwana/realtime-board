@@ -2,11 +2,13 @@ import type { Server, Socket } from 'socket.io';
 import { z } from 'zod';
 import {
   clientEventSchemas,
+  type AccessChange,
   type Ack,
   type BoardEvent,
   type ClientEventName,
   type ClientEventPayload,
   type ClientToServerEvents,
+  type InterServerEvents,
   type JoinAck,
   type PresenceMember,
   type PublicUser,
@@ -23,8 +25,8 @@ export interface SocketData {
   user: PublicUser;
   boards: Set<string>;
 }
-export type BoardServer = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
-type BoardSocket = Socket<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;
+export type BoardServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+type BoardSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 
 export const roomOf = (boardId: string) => `board:${boardId}`;
 
@@ -43,7 +45,7 @@ interface Deps {
  *  - mutations are broadcast to the board room only AFTER the transaction commits; the
  *    Redis adapter fans the broadcast out to sockets on every other instance
  */
-export function attachGateway(deps: Deps): { stop: () => void } {
+export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange: (change: AccessChange) => void } {
   const { io, service, presence, config, log } = deps;
   const instance = config.INSTANCE_ID;
 
@@ -55,6 +57,32 @@ export function attachGateway(deps: Deps): { stop: () => void } {
     io.to(roomOf(boardId)).emit('presence:update', { boardId, members });
     return members;
   }
+
+  async function leaveBoard(socket: BoardSocket, boardId: string): Promise<void> {
+    if (!socket.data.boards.delete(boardId)) return;
+    await socket.leave(roomOf(boardId));
+    await presence.leave(boardId, socket.id);
+    await broadcastPresence(boardId);
+  }
+
+  /** Applies a role change to this instance's sockets: removed users leave the room, everyone is told. */
+  async function applyAccessLocal({ boardId, userId, role }: AccessChange): Promise<void> {
+    for (const s of io.sockets.sockets.values()) {
+      const socket = s as BoardSocket;
+      if (socket.data.user?.id !== userId || !socket.data.boards?.has(boardId)) continue;
+      if (role === null) await leaveBoard(socket, boardId);
+      socket.emit('board:access', { boardId, role });
+    }
+  }
+  const applyLocally = (change: AccessChange) =>
+    void applyAccessLocal(change).catch((err) => log(`[${instance}] access change failed: ${String(err)}`));
+
+  // Other instances announce the changes made through their REST routes.
+  io.on('access:changed', applyLocally);
+  const applyAccessChange = (change: AccessChange) => {
+    applyLocally(change);
+    io.serverSideEmit('access:changed', change);
+  };
 
   io.on('connection', (socket: BoardSocket) => {
     socket.data.boards = new Set();
@@ -106,6 +134,8 @@ export function attachGateway(deps: Deps): { stop: () => void } {
     command(
       'board:join',
       async ({ boardId, lastSeq }) => {
+        const role = await service.role(boardId, user.id);
+        if (!role) throw new ServiceError('NOT_FOUND', 'Board not found');
         const head = await service.latestSeq(boardId);
         if (head === null) throw new ServiceError('NOT_FOUND', 'Board not found');
 
@@ -137,7 +167,7 @@ export function attachGateway(deps: Deps): { stop: () => void } {
         }
 
         const members = await broadcastPresence(boardId);
-        return { ...result, instance, presence: members };
+        return { ...result, instance, presence: members, role };
       },
       { requireJoined: false },
     );
@@ -145,18 +175,11 @@ export function attachGateway(deps: Deps): { stop: () => void } {
     command(
       'board:leave',
       async ({ boardId }) => {
-        await leave(boardId);
+        await leaveBoard(socket, boardId);
         return {};
       },
       { requireJoined: false },
     );
-
-    async function leave(boardId: string): Promise<void> {
-      if (!socket.data.boards.delete(boardId)) return;
-      await socket.leave(roomOf(boardId));
-      await presence.leave(boardId, socket.id);
-      await broadcastPresence(boardId);
-    }
 
     command('column:create', async (p) => publish(await service.createColumn(user.id, p)));
     command('column:rename', async (p) => publish(await service.renameColumn(user.id, p)));
@@ -189,7 +212,7 @@ export function attachGateway(deps: Deps): { stop: () => void } {
     });
 
     socket.on('disconnect', async () => {
-      await Promise.all([...socket.data.boards].map((b) => leave(b))).catch(() => {});
+      await Promise.all([...socket.data.boards].map((b) => leaveBoard(socket, b))).catch(() => {});
     });
   });
 
@@ -217,5 +240,5 @@ export function attachGateway(deps: Deps): { stop: () => void } {
   );
   timer.unref();
 
-  return { stop: () => clearInterval(timer) };
+  return { stop: () => clearInterval(timer), applyAccessChange };
 }
