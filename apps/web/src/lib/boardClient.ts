@@ -16,13 +16,14 @@ import {
   type PendingOp,
   type PresenceMember,
   type PublicUser,
+  type Role,
   type ServerToClientEvents,
 } from '@board/shared';
 import { uuid } from './uuid';
 
 export type BoardSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
-export type ConnectionStatus = 'connecting' | 'live' | 'reconnecting' | 'unauthorized';
+export type ConnectionStatus = 'connecting' | 'live' | 'reconnecting' | 'unauthorized' | 'removed';
 
 export interface RemoteCursor {
   socketId: string;
@@ -41,6 +42,8 @@ export interface BoardViewModel {
   presence: PresenceMember[];
   cursors: RemoteCursor[];
   selfSocketId: string | null;
+  /** Your role on this board; null until the first join and after you are removed. */
+  role: Role | null;
 }
 
 export interface Notice {
@@ -95,6 +98,7 @@ export class BoardClient {
     presence: [],
     cursors: [],
     selfSocketId: null,
+    role: null,
   };
   private cursors = new Map<string, RemoteCursor>();
 
@@ -120,6 +124,16 @@ export class BoardClient {
       if (c.boardId !== this.boardId) return;
       this.cursors.set(c.socketId, { socketId: c.socketId, userId: c.userId, x: c.x, y: c.y, at: Date.now() });
       this.update({});
+    });
+    socket.on('board:access', (p) => {
+      if (p.boardId !== this.boardId) return;
+      if (p.role === null) {
+        this.pending = [];
+        this.chains.clear();
+        this.update({ status: 'removed', role: null });
+        return;
+      }
+      this.update({ role: p.role });
     });
     this.pruneTimer = setInterval(() => this.pruneCursors(), 2000);
     if (socket.connected) void this.join();
@@ -182,7 +196,9 @@ export class BoardClient {
       return;
     }
     if (!ack.ok) {
-      this.notice('error', ack.message);
+      // A board we cannot join is one we were removed from (or that never existed): say so, do not retry.
+      if (ack.code === 'NOT_FOUND') this.update({ status: 'removed', role: null });
+      else this.notice('error', ack.message);
       return;
     }
     if (ack.mode === 'snapshot') {
@@ -193,7 +209,7 @@ export class BoardClient {
     }
     this.joined = true;
     this.cursors.clear();
-    this.update({ status: 'live', instance: ack.instance, presence: ack.presence });
+    this.update({ status: 'live', instance: ack.instance, presence: ack.presence, role: ack.role });
   }
 
   /** Feed sequenced events through the reorder buffer, apply what is ready, resync if a hole persists. */
@@ -249,6 +265,10 @@ export class BoardClient {
   ): void {
     if (!this.joined || !this.auth) {
       this.notice('error', 'You are offline, so that change was not saved. Try again once you are reconnected.');
+      return;
+    }
+    if (this.model.role === 'viewer') {
+      this.notice('error', 'You have view-only access to this board.');
       return;
     }
     const entry: PendingEntry = { id: this.nextId++, op };

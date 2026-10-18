@@ -77,11 +77,11 @@ class FakeSocket {
   }
 }
 
-async function setup(seq = 3) {
+async function setup(seq = 3, role: 'owner' | 'editor' | 'viewer' = 'editor') {
   const socket = new FakeSocket();
   const client = new BoardClient(socket as unknown as BoardSocket, BOARD, ME);
   const join = socket.last('board:join');
-  join.ack!(null, { ok: true, mode: 'snapshot', snapshot: snapshot(seq), instance: 'server-1', presence: [] });
+  join.ack!(null, { ok: true, mode: 'snapshot', snapshot: snapshot(seq), instance: 'server-1', presence: [], role });
   await vi.advanceTimersByTimeAsync(0);
   return { socket, client };
 }
@@ -242,5 +242,59 @@ describe('BoardClient', () => {
     await vi.advanceTimersByTimeAsync(60);
     expect(socket.count('presence:cursor')).toBe(2);
     expect(socket.last('presence:cursor').payload).toMatchObject({ x: 1, y: 0.5 });
+  });
+});
+
+describe('roles', () => {
+  it('remembers the role from the join ack', async () => {
+    const { client } = await setup(3, 'viewer');
+    expect(client.getSnapshot().role).toBe('viewer');
+  });
+
+  it('refuses writes from a viewer without touching the board or the network', async () => {
+    const { socket, client } = await setup(3, 'viewer');
+    const notices: { kind: string; message: string }[] = [];
+    client.onNotice((n) => notices.push(n));
+    client.createCard(COL_A, 'Nope');
+    client.moveCard(uid(101), COL_B, 0);
+    client.deleteCard(uid(101));
+    expect(Object.keys(client.getSnapshot().state!.cards)).toHaveLength(2);
+    expect(socket.count('card:create') + socket.count('card:move') + socket.count('card:delete')).toBe(0);
+    expect(notices).toHaveLength(3);
+    expect(notices.every((n) => n.kind === 'error' && /view-only/i.test(n.message))).toBe(true);
+  });
+
+  it('follows a live role change from the server', async () => {
+    const { socket, client } = await setup(3, 'editor');
+    socket.fire('board:access', { boardId: BOARD, role: 'viewer' });
+    expect(client.getSnapshot().role).toBe('viewer');
+    socket.fire('board:access', { boardId: BOARD, role: 'editor' });
+    expect(client.getSnapshot().role).toBe('editor');
+  });
+
+  it('ignores access changes for another board', async () => {
+    const { socket, client } = await setup(3, 'editor');
+    socket.fire('board:access', { boardId: uid(77), role: null });
+    expect(client.getSnapshot().status).toBe('live');
+    expect(client.getSnapshot().role).toBe('editor');
+  });
+
+  it('marks the board as removed when access is revoked and discards unsent changes', async () => {
+    const { socket, client } = await setup(3, 'editor');
+    client.createCard(COL_A, 'In flight');
+    socket.fire('board:access', { boardId: BOARD, role: null });
+    const m = client.getSnapshot();
+    expect(m.status).toBe('removed');
+    expect(m.role).toBeNull();
+    expect(Object.keys(m.state!.cards)).toHaveLength(2); // the optimistic card is gone
+  });
+
+  it('shows "removed" when rejoining a board it no longer has access to', async () => {
+    const { socket, client } = await setup(3, 'editor');
+    socket.fire('disconnect');
+    socket.fire('connect');
+    socket.last('board:join').ack!(null, { ok: false, code: 'NOT_FOUND', message: 'Board not found' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().status).toBe('removed');
   });
 });
