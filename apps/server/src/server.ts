@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { Redis } from 'ioredis';
 import { Server } from 'socket.io';
-import type { ClientToServerEvents, ServerToClientEvents } from '@board/shared';
+import type { AccessChange, ClientToServerEvents, ServerToClientEvents } from '@board/shared';
 import { createApp } from './app.js';
 import { verifyToken } from './auth.js';
 import { BoardService } from './boardService.js';
@@ -11,6 +11,7 @@ import type { Config } from './config.js';
 import { createPool, migrate } from './db.js';
 import { attachGateway, type BoardServer, type SocketData } from './gateway.js';
 import { noopLogger, type Logger } from './logger.js';
+import { MembershipService } from './membership.js';
 import { Presence } from './presence.js';
 
 export interface ServerInstance {
@@ -34,8 +35,11 @@ export async function createServerInstance(config: Config, log: Logger = noopLog
   const sub = pub.duplicate();
 
   const service = new BoardService(pool);
+  // The gateway is attached after the app exists, so the callback is bound late.
+  const notifyAccess: (change: AccessChange) => void = () => {};
+  const membership = new MembershipService(pool, (change) => notifyAccess(change));
   const presence = new Presence(redis, config.PRESENCE_TTL_SECONDS);
-  const app = createApp({ config, pool, redis, service, log });
+  const app = createApp({ config, pool, redis, service, membership, log });
   const httpServer = createServer(app);
 
   const io: BoardServer = new Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>(

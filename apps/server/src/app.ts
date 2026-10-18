@@ -1,20 +1,23 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import helmet from 'helmet';
 import { z } from 'zod';
-import { LIMITS } from '@board/shared';
+import { LIMITS, addMemberBody, setRoleBody, type ErrorCode } from '@board/shared';
 import type { Redis } from 'ioredis';
 import { consumeMagicToken, createMagicLink, signToken, upsertUser, verifyToken } from './auth.js';
 import type { BoardService } from './boardService.js';
 import type { Config } from './config.js';
 import type { Pool } from './db.js';
+import { ServiceError } from './errors.js';
 import { redisRateLimit } from './httpRateLimit.js';
 import type { Logger } from './logger.js';
+import type { MembershipService } from './membership.js';
 
 interface Deps {
   config: Config;
   pool: Pool;
   redis: Redis;
   service: BoardService;
+  membership: MembershipService;
   log: Logger;
 }
 
@@ -29,7 +32,7 @@ class HttpError extends Error {
   }
 }
 
-export function createApp({ config, pool, redis, service, log }: Deps) {
+export function createApp({ config, pool, redis, service, membership, log }: Deps) {
   const app = express();
   app.disable('x-powered-by');
   // Without this, req.ip is the proxy's address and every client would share one rate-limit budget.
@@ -101,26 +104,68 @@ export function createApp({ config, pool, redis, service, log }: Deps) {
     next();
   });
 
-  api.get('/boards', async (req: Request & { userId?: string }, res) => {
+  type AuthedRequest = Request & { userId?: string };
+
+  /** Non-members get the same 404 as for a board that does not exist. */
+  const mustBeMember = async (boardId: string, userId: string) => {
+    if (!(await service.role(boardId, userId))) throw new HttpError(404, 'Board not found');
+  };
+
+  api.get('/boards', async (req: AuthedRequest, res) => {
     res.json({ boards: await service.listBoards(req.userId!) });
   });
 
-  api.post('/boards', async (req: Request & { userId?: string }, res) => {
+  api.post('/boards', async (req: AuthedRequest, res) => {
     const { name } = z.object({ name: z.string().trim().min(1).max(LIMITS.boardName) }).parse(req.body);
     res.status(201).json(await service.createBoard(req.userId!, name));
   });
 
-  api.get('/boards/:id', async (req, res) => {
+  api.get('/boards/:id', async (req: AuthedRequest, res) => {
     const id = z.uuid().parse(req.params.id);
+    await mustBeMember(id, req.userId!);
     const snapshot = await service.getSnapshot(id);
     if (!snapshot) throw new HttpError(404, 'Board not found');
     res.json(snapshot);
   });
 
-  api.get('/boards/:id/events', async (req, res) => {
+  api.get('/boards/:id/events', async (req: AuthedRequest, res) => {
     const id = z.uuid().parse(req.params.id);
+    await mustBeMember(id, req.userId!);
     const after = z.coerce.number().int().min(0).default(0).parse(req.query.after);
     res.json({ events: await service.eventsSince(id, after, 500) });
+  });
+
+  api.get('/boards/:id/members', async (req: AuthedRequest, res) => {
+    const id = z.uuid().parse(req.params.id);
+    res.json(await membership.listMembers(id, req.userId!));
+  });
+
+  api.post('/boards/:id/members', async (req: AuthedRequest, res) => {
+    const id = z.uuid().parse(req.params.id);
+    const { email, role } = addMemberBody.parse(req.body);
+    res.json(await membership.addMember(id, req.userId!, email, role));
+  });
+
+  api.patch('/boards/:id/members/:userId', async (req: AuthedRequest, res) => {
+    const id = z.uuid().parse(req.params.id);
+    const userId = z.uuid().parse(req.params.userId);
+    const { role } = setRoleBody.parse(req.body);
+    await membership.setRole(id, req.userId!, userId, role);
+    res.json({ ok: true });
+  });
+
+  api.delete('/boards/:id/members/:userId', async (req: AuthedRequest, res) => {
+    const id = z.uuid().parse(req.params.id);
+    const userId = z.uuid().parse(req.params.userId);
+    await membership.removeMember(id, req.userId!, userId);
+    res.json({ ok: true });
+  });
+
+  api.delete('/boards/:id/invites/:email', async (req: AuthedRequest, res) => {
+    const id = z.uuid().parse(req.params.id);
+    const email = z.email().parse(req.params.email);
+    await membership.removeInvite(id, req.userId!, email);
+    res.json({ ok: true });
   });
 
   app.use('/api', api);
@@ -131,6 +176,10 @@ export function createApp({ config, pool, redis, service, log }: Deps) {
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof HttpError) return void res.status(err.status).json({ error: err.message });
+    if (err instanceof ServiceError) {
+      const status: Partial<Record<ErrorCode, number>> = { NOT_FOUND: 404, FORBIDDEN: 403, VALIDATION: 400 };
+      return void res.status(status[err.code] ?? 500).json({ error: err.message });
+    }
     if (err instanceof z.ZodError) return void res.status(400).json({ error: z.prettifyError(err) });
     log(`unhandled: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
     res.status(500).json({ error: 'Internal error' });
