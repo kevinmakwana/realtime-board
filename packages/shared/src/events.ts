@@ -8,6 +8,7 @@ import {
   idSchema,
   orderKeySchema,
   publicUserSchema,
+  type Role,
 } from './models.js';
 
 /* ------------------------------------------------------------------ */
@@ -129,6 +130,7 @@ export const ERROR_CODES = [
   'VALIDATION',
   'UNAUTHORIZED',
   'NOT_FOUND',
+  'FORBIDDEN',
   'VERSION_CONFLICT',
   'RATE_LIMITED',
   'NOT_JOINED',
@@ -159,7 +161,7 @@ export type JoinResult =
   | { mode: 'snapshot'; snapshot: z.infer<typeof boardSnapshotSchema> }
   | { mode: 'replay'; events: BoardEvent[]; seq: number };
 
-export type JoinAck = Ack<JoinResult & { instance: string; presence: PresenceMember[] }>;
+export type JoinAck = Ack<JoinResult & { instance: string; presence: PresenceMember[]; role: Role }>;
 
 /* ------------------------------------------------------------------ */
 /* Server -> client broadcasts                                         */
@@ -177,6 +179,15 @@ export interface ServerToClientEvents {
   'board:event': (event: BoardEvent) => void;
   'presence:update': (payload: { boardId: string; members: PresenceMember[] }) => void;
   'presence:cursor': (cursor: CursorBroadcast) => void;
+  /** Your role on a board changed (`null`: you were removed from it). */
+  'board:access': (payload: { boardId: string; role: Role | null }) => void;
+}
+
+export type AccessChange = { boardId: string; userId: string; role: Role | null };
+
+/** Events instances send each other through the Redis adapter (`io.serverSideEmit`). */
+export interface InterServerEvents {
+  'access:changed': (change: AccessChange) => void;
 }
 
 type AckFn<T = object> = (ack: Ack<T>) => void;
