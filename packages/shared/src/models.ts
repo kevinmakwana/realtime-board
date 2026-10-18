@@ -23,6 +23,35 @@ export const boardSchema = z.object({
 });
 export type Board = z.infer<typeof boardSchema>;
 
+export const roleSchema = z.enum(['owner', 'editor', 'viewer']);
+export type Role = z.infer<typeof roleSchema>;
+/** Roles an owner can hand out. There is exactly one owner per board. */
+export const grantableRoleSchema = z.enum(['editor', 'viewer']);
+export type GrantableRole = z.infer<typeof grantableRoleSchema>;
+export const canWrite = (role: Role | null): boolean => role === 'owner' || role === 'editor';
+
+export const boardWithRoleSchema = boardSchema.extend({ role: roleSchema });
+export type BoardWithRole = z.infer<typeof boardWithRoleSchema>;
+
+export const memberSchema = z.object({
+  userId: idSchema,
+  name: z.string(),
+  color: z.string(),
+  role: roleSchema,
+  /** Only sent to the board owner. */
+  email: z.string().optional(),
+});
+export type Member = z.infer<typeof memberSchema>;
+
+export const inviteSchema = z.object({ email: z.string(), role: grantableRoleSchema });
+export type Invite = z.infer<typeof inviteSchema>;
+
+export type MembersResponse = { members: Member[]; invites?: Invite[] };
+export type AddMemberResult = { member: Member } | { invite: Invite };
+
+export const addMemberBody = z.object({ email: z.email().max(200), role: grantableRoleSchema });
+export const setRoleBody = z.object({ role: grantableRoleSchema });
+
 export const columnSchema = z.object({
   id: idSchema,
   boardId: idSchema,
