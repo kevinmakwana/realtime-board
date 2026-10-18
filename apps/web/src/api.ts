@@ -1,4 +1,11 @@
-import type { Board, BoardSnapshot, PublicUser } from '@board/shared';
+import type {
+  AddMemberResult,
+  BoardSnapshot,
+  BoardWithRole,
+  GrantableRole,
+  MembersResponse,
+  PublicUser,
+} from '@board/shared';
 
 export interface Session {
   token: string;
@@ -64,6 +71,15 @@ export const api = {
   devLogin: (email: string, name?: string) => request<Session>('/api/auth/dev-login', { body: { email, name } }),
   magicLink: (email: string) => request<{ ok: true }>('/api/auth/magic-link', { body: { email } }),
   verify: (token: string) => request<Session>('/api/auth/verify', { body: { token } }),
-  listBoards: () => request<{ boards: Board[] }>('/api/boards'),
+  listBoards: () => request<{ boards: BoardWithRole[] }>('/api/boards'),
+  listMembers: (boardId: string) => request<MembersResponse>(`/api/boards/${boardId}/members`),
+  addMember: (boardId: string, email: string, role: GrantableRole) =>
+    request<AddMemberResult>(`/api/boards/${boardId}/members`, { body: { email, role } }),
+  setMemberRole: (boardId: string, userId: string, role: GrantableRole) =>
+    request<{ ok: true }>(`/api/boards/${boardId}/members/${userId}`, { method: 'PATCH', body: { role } }),
+  removeMember: (boardId: string, userId: string) =>
+    request<{ ok: true }>(`/api/boards/${boardId}/members/${userId}`, { method: 'DELETE' }),
+  removeInvite: (boardId: string, email: string) =>
+    request<{ ok: true }>(`/api/boards/${boardId}/invites/${encodeURIComponent(email)}`, { method: 'DELETE' }),
   createBoard: (name: string) => request<BoardSnapshot>('/api/boards', { body: { name } }),
 };
