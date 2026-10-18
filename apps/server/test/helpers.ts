@@ -38,7 +38,7 @@ export interface TestWorld {
   sockets: ClientSocket[];
   close: () => Promise<void>;
   newUser: (name?: string) => Promise<{ id: string; name: string; token: string }>;
-  newBoard: (ownerId: string) => Promise<BoardSnapshot>;
+  newBoard: (ownerId: string, editors?: string[]) => Promise<BoardSnapshot>;
   connect: (port: number, token: string) => Promise<ClientSocket>;
 }
 
@@ -58,7 +58,16 @@ export function createWorld(): TestWorld {
       const user = await upsertUser(pool, `${randomUUID()}@example.test`, name);
       return { id: user.id, name: user.name, token: signToken(user, config.JWT_SECRET) };
     },
-    newBoard: (ownerId) => service.createBoard(ownerId, `Board ${randomUUID().slice(0, 6)}`),
+    async newBoard(ownerId, editors = []) {
+      const snap = await service.createBoard(ownerId, `Board ${randomUUID().slice(0, 6)}`);
+      for (const userId of editors) {
+        await pool.query("INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, 'editor')", [
+          snap.board.id,
+          userId,
+        ]);
+      }
+      return snap;
+    },
     async connect(port, token) {
       const socket: ClientSocket = connectClient(`http://localhost:${port}`, {
         auth: { token },

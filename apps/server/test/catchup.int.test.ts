@@ -19,7 +19,7 @@ describe('reconnect catch-up', () => {
   it('replays exactly the missed events (even via a different instance) and converges on the same state', async () => {
     const ada = await world.newUser('Ada');
     const grace = await world.newUser('Grace');
-    const snap = await world.newBoard(ada.id);
+    const snap = await world.newBoard(ada.id, [grace.id]);
 
     const writer = await world.connect(a.port, ada.token);
     await join(writer, snap.board.id);

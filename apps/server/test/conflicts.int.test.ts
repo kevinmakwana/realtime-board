@@ -20,7 +20,7 @@ describe('version conflicts, validation and rate limiting', () => {
   it('accepts the first writer and rejects a stale update with the current card for resync', async () => {
     const ada = await world.newUser('Ada');
     const grace = await world.newUser('Grace');
-    const snap = await world.newBoard(ada.id);
+    const snap = await world.newBoard(ada.id, [grace.id]);
     const sa = await world.connect(a.port, ada.token);
     const sb = await world.connect(b.port, grace.token);
     await join(sa, snap.board.id);
@@ -115,7 +115,7 @@ describe('per-socket rate limiting', () => {
   it('rejects commands over the burst with RATE_LIMITED, per socket', async () => {
     const ada = await world.newUser('Ada');
     const grace = await world.newUser('Grace');
-    const snap = await world.newBoard(ada.id);
+    const snap = await world.newBoard(ada.id, [grace.id]);
     const noisy = await world.connect(inst.port, ada.token);
     const calm = await world.connect(inst.port, grace.token);
     await join(noisy, snap.board.id); // 1 token

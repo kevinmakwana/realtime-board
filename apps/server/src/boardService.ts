@@ -5,6 +5,7 @@ import {
   keysBetween,
   resolveCollision,
   type Board,
+  type BoardWithRole,
   type BoardEvent,
   type BoardSnapshot,
   type Card,
@@ -12,9 +13,12 @@ import {
   type Column,
   type Comment,
   type NewBoardEvent,
+  type Role,
+  canWrite,
 } from '@board/shared';
 import type { Pool } from './db.js';
 import { ServiceError } from './errors.js';
+import { roleOf } from './roles.js';
 
 /* ---------- row mappers ---------- */
 
@@ -65,11 +69,18 @@ export class BoardService {
 
   /* ---------------- reads ---------------- */
 
-  async listBoards(): Promise<Board[]> {
+  async listBoards(userId: string): Promise<BoardWithRole[]> {
     const { rows } = await this.pool.query(
-      'SELECT id, name, created_at FROM boards ORDER BY created_at DESC LIMIT 100',
+      `SELECT b.id, b.name, b.created_at, m.role
+         FROM boards b JOIN board_members m ON m.board_id = b.id
+        WHERE m.user_id = $1 ORDER BY b.created_at DESC LIMIT 100`,
+      [userId],
     );
-    return rows.map(toBoard);
+    return rows.map((r) => ({ ...toBoard(r), role: r.role as Role }));
+  }
+
+  async role(boardId: string, userId: string): Promise<Role | null> {
+    return roleOf(this.pool, boardId, userId);
   }
 
   async boardExists(boardId: string): Promise<boolean> {
@@ -142,6 +153,7 @@ export class BoardService {
     try {
       await client.query('BEGIN');
       await client.query('INSERT INTO boards (id, name, owner_id) VALUES ($1, $2, $3)', [id, name, ownerId]);
+      await client.query("INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, 'owner')", [id, ownerId]);
       const positions = keysBetween(null, null, DEFAULT_COLUMNS.length);
       for (const [i, colName] of DEFAULT_COLUMNS.entries()) {
         await client.query('INSERT INTO columns (id, board_id, name, position) VALUES ($1, $2, $3, $4)', [
@@ -179,6 +191,10 @@ export class BoardService {
       const lock = await client.query('SELECT last_seq FROM boards WHERE id = $1 FOR UPDATE', [boardId]);
       if (!lock.rows[0]) throw new ServiceError('NOT_FOUND', 'Board not found');
       const current = lock.rows[0].last_seq as number;
+      // Read inside the lock: a removal committed before this point is always seen.
+      const role = await roleOf(client, boardId, actorId);
+      if (!role) throw new ServiceError('NOT_FOUND', 'Board not found');
+      if (!canWrite(role)) throw new ServiceError('FORBIDDEN', 'You have view-only access to this board');
 
       const out = await fn(client);
       if (!out) {
