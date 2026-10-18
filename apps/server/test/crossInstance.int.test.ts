@@ -20,7 +20,7 @@ describe('cross-instance broadcast (Redis adapter)', () => {
   it('delivers an event committed on instance A to a client connected to instance B', async () => {
     const ada = await world.newUser('Ada');
     const grace = await world.newUser('Grace');
-    const snap = await world.newBoard(ada.id);
+    const snap = await world.newBoard(ada.id, [grace.id]);
 
     const onA = await world.connect(a.port, ada.token);
     const onB = await world.connect(b.port, grace.token);
@@ -42,7 +42,7 @@ describe('cross-instance broadcast (Redis adapter)', () => {
   it('shows presence from both instances and relays cursors across instances', async () => {
     const ada = await world.newUser('Ada');
     const grace = await world.newUser('Grace');
-    const snap = await world.newBoard(ada.id);
+    const snap = await world.newBoard(ada.id, [grace.id]);
     const onA = await world.connect(a.port, ada.token);
     const onB = await world.connect(b.port, grace.token);
     await join(onA, snap.board.id);
@@ -73,7 +73,7 @@ describe('cross-instance broadcast (Redis adapter)', () => {
   it('keeps event sequence numbers gapless and unique under concurrent writers on both instances', async () => {
     const ada = await world.newUser('Ada');
     const grace = await world.newUser('Grace');
-    const snap = await world.newBoard(ada.id);
+    const snap = await world.newBoard(ada.id, [grace.id]);
     const onA = await world.connect(a.port, ada.token);
     const onB = await world.connect(b.port, grace.token);
     await join(onA, snap.board.id);

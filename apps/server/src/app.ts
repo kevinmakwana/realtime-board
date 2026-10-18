@@ -101,8 +101,8 @@ export function createApp({ config, pool, redis, service, log }: Deps) {
     next();
   });
 
-  api.get('/boards', async (_req, res) => {
-    res.json({ boards: await service.listBoards() });
+  api.get('/boards', async (req: Request & { userId?: string }, res) => {
+    res.json({ boards: await service.listBoards(req.userId!) });
   });
 
   api.post('/boards', async (req: Request & { userId?: string }, res) => {

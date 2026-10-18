@@ -1,3 +1,10 @@
+/** Gives every board that has an owner_id a matching owner member. Idempotent. */
+export const BACKFILL_OWNERS_SQL = `
+  INSERT INTO board_members (board_id, user_id, role)
+  SELECT id, owner_id, 'owner' FROM boards WHERE owner_id IS NOT NULL
+  ON CONFLICT (board_id, user_id) DO NOTHING;
+`;
+
 /** Ordered, append-only schema migrations. Bundled as strings so the server ships as one file. */
 export const migrations: { id: number; name: string; sql: string }[] = [
   {
@@ -63,6 +70,32 @@ export const migrations: { id: number; name: string; sql: string }[] = [
         created_at  timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (board_id, seq)
       );
+    `,
+  },
+  {
+    id: 2,
+    name: 'board membership',
+    sql: `
+      CREATE TABLE board_members (
+        board_id   uuid NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+        user_id    uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role       text NOT NULL CHECK (role IN ('owner', 'editor', 'viewer')),
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (board_id, user_id)
+      );
+      CREATE INDEX board_members_user_idx ON board_members (user_id);
+      CREATE UNIQUE INDEX board_members_one_owner ON board_members (board_id) WHERE role = 'owner';
+
+      CREATE TABLE board_invites (
+        board_id   uuid NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+        email      text NOT NULL,
+        role       text NOT NULL CHECK (role IN ('editor', 'viewer')),
+        invited_by uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (board_id, email)
+      );
+
+      ${BACKFILL_OWNERS_SQL}
     `,
   },
 ];
