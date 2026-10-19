@@ -166,7 +166,9 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 | `PATCH /api/boards/:id/members/:userId` | Owner only. `{ role }`. The owner's own role cannot change. |
 | `DELETE /api/boards/:id/members/:userId` | The owner removes anyone but themselves; any other member can remove themselves (leave). |
 | `DELETE /api/boards/:id/invites/:email` | Owner only. Withdraw a pending invite. |
-| `GET /health` | `{ ok, instance }`. |
+| `GET /health` | Liveness: `{ ok, instance }`. Touches no dependency. |
+| `GET /ready` | Readiness: pings Postgres and Redis (2 s deadline each). `200` with `{ ok: true, checks }`, or `503` naming the dependency that failed. The compose healthchecks use it. |
+| `GET /metrics` | Prometheus text: process metrics, `http_requests_total`, `http_request_duration_seconds`, `ws_connections`, `board_commands_total{command,result}` and `board_command_duration_seconds`, all labelled with the instance. nginx does not proxy it, so scrape each instance directly. |
 
 ## Scaling notes
 
@@ -177,6 +179,7 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 - **Sticky sessions.** Socket.IO's long-polling handshake needs every request of a session on one instance, even with the Redis adapter. The web app adds a random per-tab `cid` to every Socket.IO request and nginx does `hash $arg_cid consistent`. Hashing on `$remote_addr` would pin every local tab to one instance. `?node=1|2` overrides this for demos. `proxy_read_timeout` is 120 s, above Socket.IO's 25 s ping interval plus 20 s ping timeout.
 - **Presence.** Each socket has a Redis key with a TTL (default 30 s) and an entry in a per-board sorted set. Instances refresh the keys of their own sockets every TTL/3. If a client or a whole instance dies, its keys expire, `list()` prunes the dangling index entries, and surviving instances notice the roster changed on their next heartbeat and rebroadcast it.
 - **Rate limiting.** One token bucket per socket for commands (default 20/s sustained, burst 40) and a separate one for cursors (30/s). A noisy socket gets `RATE_LIMITED` acks and does not affect others. The limits are per instance process, which is per socket, so they do not need Redis.
+- **Operations.** Logs are one JSON object per line in production (`LOG_FORMAT=json`, with `time`, `level`, `instance`, `msg` and fields) and readable text otherwise. Every HTTP request is logged by method, path and status (never the query string); probes and scrapes are not. Socket commands are counted by outcome, so a rise in `FORBIDDEN`, `VERSION_CONFLICT` or `INTERNAL` shows up without reading logs.
 - **HTTP hardening.** `/api/auth/*` is rate limited per client IP, and magic links are also limited per email address. Both limiters count in Redis, so the budget is shared by every instance, and they fail open if Redis is unreachable. Helmet sets the standard security headers. Set `TRUST_PROXY` to the number of proxies in front of the server (the compose profile uses 1); leaving it at 0 means a spoofed `X-Forwarded-For` cannot dodge a limit.
 - **Throttling on the client.** Cursor packets go out at most every 50 ms and always end on the latest position.
 - **Access control.** Every command re-reads the actor's role inside the same board-locked transaction that writes the event, so a removal or downgrade that has committed is always seen by the next write. Live sockets learn about the change through `io.serverSideEmit` (delivered by the Redis adapter), and a removed socket leaves the board room and the presence roster. Non-members get the same answer as for a board that does not exist, so ids do not leak.
@@ -205,6 +208,7 @@ docker/         nginx config for the scale profile
 | `TRUST_PROXY` | `0` | Number of reverse proxies in front of the server (nginx = 1). Needed for per-client rate limits to see real IPs |
 | `AUTH_RATE_LIMIT_PER_MIN` | `20` | Requests per client IP per minute across `/api/auth/*` |
 | `MAGIC_LINK_PER_EMAIL_PER_HOUR` | `5` | Magic links one address can be sent per hour |
+| `LOG_FORMAT` | `json` in production, `text` otherwise | Log line format |
 | `SMTP_URL` | unset | For example `smtp://user:pass@smtp.example.com:587` (`smtps://` for TLS). Unset: emails are printed to the log. The server warns at start-up if this is unset in production |
 | `MAIL_FROM` | `Realtime Board <no-reply@localhost>` | The From address of sign-in and invitation emails |
 | `PRESENCE_TTL_SECONDS` | `30` | |

@@ -27,6 +27,8 @@ const schema = z.object({
     .pipe(z.url().optional()),
   /** The From header of every email the server sends. */
   MAIL_FROM: z.string().min(3).default('Realtime Board <no-reply@localhost>'),
+  /** `json`: one JSON object per log line (default in production). `text`: readable lines (default otherwise). */
+  LOG_FORMAT: z.enum(['json', 'text']).optional(),
   /** Enables POST /api/auth/dev-login. Off by default in production. */
   AUTH_DEV_LOGIN: bool.optional(),
   /** Seconds a presence entry lives without a heartbeat (crashed clients/instances vanish after this). */
@@ -39,13 +41,17 @@ const schema = z.object({
   REPLAY_MAX_EVENTS: z.coerce.number().int().positive().default(500),
 });
 
-export type Config = Omit<z.infer<typeof schema>, 'AUTH_DEV_LOGIN'> & { AUTH_DEV_LOGIN: boolean };
+export type Config = Omit<z.infer<typeof schema>, 'AUTH_DEV_LOGIN' | 'LOG_FORMAT'> & {
+  AUTH_DEV_LOGIN: boolean;
+  LOG_FORMAT: 'json' | 'text';
+};
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, overrides: Partial<Config> = {}): Config {
   const parsed = schema.parse(env);
   const config = {
     ...parsed,
     AUTH_DEV_LOGIN: parsed.AUTH_DEV_LOGIN ?? parsed.NODE_ENV !== 'production',
+    LOG_FORMAT: parsed.LOG_FORMAT ?? (parsed.NODE_ENV === 'production' ? ('json' as const) : ('text' as const)),
     ...overrides,
   };
   // Anyone can read the dev secret in this repo, so tokens signed with it are forgeable.

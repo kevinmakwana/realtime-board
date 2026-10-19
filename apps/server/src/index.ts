@@ -1,4 +1,5 @@
 import { loadConfig } from './config.js';
+import { createLogger } from './logger.js';
 import { createServerInstance } from './server.js';
 
 for (const file of ['.env', '../../.env']) {
@@ -10,12 +11,12 @@ for (const file of ['.env', '../../.env']) {
 }
 
 const config = loadConfig();
-const log = (m: string) => console.log(m);
+const log = createLogger({ format: config.LOG_FORMAT, instance: config.INSTANCE_ID });
 
 const instance = await createServerInstance(config, log);
 
 const shutdown = async (signal: string) => {
-  log(`[${config.INSTANCE_ID}] ${signal} received, shutting down`);
+  log('shutting down', { signal });
   await instance.close();
   process.exit(0);
 };
