@@ -11,6 +11,8 @@ import { ServiceError } from './errors.js';
 import { redisRateLimit } from './httpRateLimit.js';
 import type { Logger } from './logger.js';
 import { type Mailer, magicLinkMail } from './mailer.js';
+import type { Metrics } from './metrics.js';
+import { checkReadiness, observeHttp } from './observability.js';
 import type { MembershipService } from './membership.js';
 
 interface Deps {
@@ -20,6 +22,7 @@ interface Deps {
   service: BoardService;
   membership: MembershipService;
   mailer: Mailer;
+  metrics: Metrics;
   log: Logger;
 }
 
@@ -34,16 +37,33 @@ class HttpError extends Error {
   }
 }
 
-export function createApp({ config, pool, redis, service, membership, mailer, log }: Deps) {
+export function createApp({ config, pool, redis, service, membership, mailer, metrics, log }: Deps) {
   const app = express();
   app.disable('x-powered-by');
   // Without this, req.ip is the proxy's address and every client would share one rate-limit budget.
   app.set('trust proxy', config.TRUST_PROXY);
   app.use(helmet());
+  app.use(observeHttp(metrics, log));
   app.use(express.json({ limit: '32kb' }));
 
   app.get('/health', (_req, res) => {
     res.json({ ok: true, instance: config.INSTANCE_ID });
+  });
+
+  // Readiness: can this instance do its job? 503 takes it out of rotation without restarting it.
+  app.get('/ready', async (_req, res) => {
+    const result = await checkReadiness(
+      { postgres: () => pool.query('SELECT 1'), redis: () => redis.ping() },
+      2000,
+      (dependency, error) => log('dependency not ready', { level: 'error', dependency, error: String(error) }),
+    );
+    res.status(result.ok ? 200 : 503).json({ ...result, instance: config.INSTANCE_ID });
+  });
+
+  // Prometheus scrape target. nginx does not proxy it, so it is only reachable inside the network.
+  app.get('/metrics', async (_req, res) => {
+    res.set('Content-Type', metrics.registry.contentType);
+    res.send(await metrics.registry.metrics());
   });
 
   /* ---------- auth ---------- */
@@ -88,7 +108,7 @@ export function createApp({ config, pool, redis, service, membership, mailer, lo
       await mailer.send(magicLinkMail(email, link));
     } catch (err) {
       // Answer the same either way: the response must not reveal whether an address is deliverable.
-      log(`failed to send the sign-in link to ${email}: ${String(err)}`);
+      log('failed to send the sign-in link', { level: 'error', email, error: String(err) });
     }
     res.json({ ok: true });
   });
@@ -188,7 +208,7 @@ export function createApp({ config, pool, redis, service, membership, mailer, lo
       return void res.status(status[err.code] ?? 500).json({ error: err.message });
     }
     if (err instanceof z.ZodError) return void res.status(400).json({ error: z.prettifyError(err) });
-    log(`unhandled: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+    log('unhandled error', { level: 'error', error: err instanceof Error ? (err.stack ?? err.message) : String(err) });
     res.status(500).json({ error: 'Internal error' });
   });
 

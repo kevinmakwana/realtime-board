@@ -15,14 +15,14 @@ class FakeMailer implements Mailer {
 describe('sign-in and invitation emails', () => {
   const world = createWorld();
   const mailer = new FakeMailer();
-  const logs: string[] = [];
+  const logs: { message: string; fields?: Record<string, unknown> }[] = [];
   let inst: ServerInstance;
   const origin = baseConfig().WEB_ORIGIN;
 
   beforeAll(async () => {
     inst = await createServerInstance(
       baseConfig({ INSTANCE_ID: 'mail', AUTH_RATE_LIMIT_PER_MIN: 1000 }),
-      (m) => logs.push(m),
+      (message, fields) => logs.push({ message, fields }),
       { mailer },
     );
   });
@@ -60,7 +60,9 @@ describe('sign-in and invitation emails', () => {
     } finally {
       mailer.fail = false;
     }
-    expect(logs.join('\n')).toContain('smtp is down');
+    const failure = logs.find((l) => l.message.includes('failed to send the sign-in link'));
+    expect(failure?.fields).toMatchObject({ level: 'error' });
+    expect(JSON.stringify(failure)).toContain('smtp is down');
   });
 
   it('emails a pending invite to an address with no account, and a direct invite to an existing user', async () => {

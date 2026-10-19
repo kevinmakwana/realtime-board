@@ -18,6 +18,7 @@ import type { BoardService, CommitResult } from './boardService.js';
 import type { Config } from './config.js';
 import { ServiceError } from './errors.js';
 import type { Logger } from './logger.js';
+import type { Metrics } from './metrics.js';
 import type { Presence } from './presence.js';
 import { TokenBucket } from './rateLimit.js';
 
@@ -35,6 +36,7 @@ interface Deps {
   service: BoardService;
   presence: Presence;
   config: Config;
+  metrics: Metrics;
   log: Logger;
 }
 
@@ -46,7 +48,7 @@ interface Deps {
  *    Redis adapter fans the broadcast out to sockets on every other instance
  */
 export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange: (change: AccessChange) => void } {
-  const { io, service, presence, config, log } = deps;
+  const { io, service, presence, config, metrics, log } = deps;
   const instance = config.INSTANCE_ID;
 
   const lastBroadcast = new Map<string, string>();
@@ -75,7 +77,7 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
     }
   }
   const applyLocally = (change: AccessChange) =>
-    void applyAccessLocal(change).catch((err) => log(`[${instance}] access change failed: ${String(err)}`));
+    void applyAccessLocal(change).catch((err) => log('access change failed', { level: 'error', error: String(err) }));
 
   // Other instances announce the changes made through their REST routes.
   io.on('access:changed', applyLocally);
@@ -99,7 +101,13 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
       opts: { requireJoined?: boolean } = { requireJoined: true },
     ): void {
       on(name, async (raw, ackFn) => {
-        const ack = (typeof ackFn === 'function' ? ackFn : () => {}) as (a: Ack<Record<string, unknown>>) => void;
+        const started = process.hrtime.bigint();
+        const send = (typeof ackFn === 'function' ? ackFn : () => {}) as (a: Ack<Record<string, unknown>>) => void;
+        /** Acknowledges the command and records how it went (ok, or the error code) and how long it took. */
+        const ack = (a: Ack<Record<string, unknown>>) => {
+          metrics.observeCommand(name, a.ok ? 'ok' : a.code, Number(process.hrtime.bigint() - started) / 1e9);
+          send(a);
+        };
         if (!bucket.take()) {
           return ack({ ok: false, code: 'RATE_LIMITED', message: 'Too many requests, slow down' });
         }
@@ -118,7 +126,11 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
           if (err instanceof ServiceError) {
             ack({ ok: false, code: err.code, message: err.message, ...(err.current && { current: err.current }) });
           } else {
-            log(`[${instance}] ${name} failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+            log('command failed', {
+              level: 'error',
+              command: name,
+              error: err instanceof Error ? (err.stack ?? err.message) : String(err),
+            });
             ack({ ok: false, code: 'INTERNAL', message: 'Something went wrong' });
           }
         }
@@ -250,7 +262,7 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
           if (lastBroadcast.get(boardId) !== JSON.stringify(members)) await broadcastPresence(boardId);
         }
       } catch (err) {
-        log(`[${instance}] presence heartbeat failed: ${String(err)}`);
+        log('presence heartbeat failed', { level: 'error', error: String(err) });
       }
     },
     Math.max(1000, (config.PRESENCE_TTL_SECONDS * 1000) / 3),

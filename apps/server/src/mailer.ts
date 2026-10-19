@@ -45,7 +45,9 @@ export class SmtpMailer implements Mailer {
 export function createMailer(config: Config, log: Logger): Mailer {
   if (config.SMTP_URL) return new SmtpMailer(nodemailer.createTransport(config.SMTP_URL), config.MAIL_FROM);
   if (config.NODE_ENV === 'production') {
-    log('SMTP_URL is not set: sign-in and invitation emails are only printed to this log, nobody will receive them');
+    log('SMTP_URL is not set: sign-in and invitation emails are only printed to this log, nobody will receive them', {
+      level: 'warn',
+    });
   }
   return new ConsoleMailer(log);
 }
@@ -85,6 +87,8 @@ export type InviteNotifier = (details: Omit<InviteDetails, 'link'> & { boardId: 
 export function createInviteNotifier(mailer: Mailer, webOrigin: string, log: Logger): InviteNotifier {
   return ({ boardId, ...rest }) => {
     const mail = inviteMail({ ...rest, link: `${webOrigin}/boards/${boardId}` });
-    mailer.send(mail).catch((err) => log(`failed to send the invitation to ${rest.to}: ${String(err)}`));
+    mailer
+      .send(mail)
+      .catch((err) => log('failed to send the invitation', { level: 'error', to: rest.to, error: String(err) }));
   };
 }

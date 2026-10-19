@@ -12,6 +12,7 @@ import { createPool, migrate } from './db.js';
 import { attachGateway, type BoardServer, type SocketData } from './gateway.js';
 import { noopLogger, type Logger } from './logger.js';
 import { type Mailer, createInviteNotifier, createMailer } from './mailer.js';
+import { createMetrics } from './metrics.js';
 import { MembershipService } from './membership.js';
 import { Presence } from './presence.js';
 
@@ -42,6 +43,7 @@ export async function createServerInstance(
   const service = new BoardService(pool);
   // The gateway is attached after the app exists, so the callback is bound late.
   let notifyAccess: (change: AccessChange) => void = () => {};
+  const metrics = createMetrics(config.INSTANCE_ID);
   const mailer = deps.mailer ?? createMailer(config, log);
   const membership = new MembershipService(
     pool,
@@ -49,7 +51,7 @@ export async function createServerInstance(
     createInviteNotifier(mailer, config.WEB_ORIGIN, log),
   );
   const presence = new Presence(redis, config.PRESENCE_TTL_SECONDS);
-  const app = createApp({ config, pool, redis, service, membership, mailer, log });
+  const app = createApp({ config, pool, redis, service, membership, mailer, metrics, log });
   const httpServer = createServer(app);
 
   const io: BoardServer = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(
@@ -70,7 +72,8 @@ export async function createServerInstance(
     next();
   });
 
-  const gateway = attachGateway({ io, service, presence, config, log });
+  metrics.trackSockets(() => io.engine.clientsCount);
+  const gateway = attachGateway({ io, service, presence, config, metrics, log });
   notifyAccess = gateway.applyAccessChange;
 
   await new Promise<void>((resolve, reject) => {
@@ -78,7 +81,7 @@ export async function createServerInstance(
     httpServer.listen(config.PORT, resolve);
   });
   const port = (httpServer.address() as AddressInfo).port;
-  log(`[${config.INSTANCE_ID}] listening on :${port}`);
+  log('listening', { port });
 
   return {
     port,

@@ -37,7 +37,7 @@ export function redisRateLimit(redis: Redis, { name, limit, windowSeconds, key, 
         return;
       }
     } catch (err) {
-      log(`rate limiter "${name}" failed open: ${String(err)}`);
+      log('rate limiter failed open', { level: 'warn', limiter: name, error: String(err) });
     }
     next();
   };

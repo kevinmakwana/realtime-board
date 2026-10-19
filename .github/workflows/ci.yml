@@ -99,6 +99,8 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsS http://localhost:8088/health
+          curl -fsS http://localhost:8088/ready | grep -q '"ok":true'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/metrics)" = 404
           for node in 1 2; do
             curl -fsS "http://localhost:8088/socket.io/?EIO=4&transport=polling&cid=ci-$node&node=$node" | grep -q '"sid"'
           done
