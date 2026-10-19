@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { Board } from '@board/shared';
+import type { BoardWithRole } from '@board/shared';
 import { api, setSession, type Session } from '../api';
 import { navigate } from '../router';
 
 export function BoardsPage({ session }: { session: Session }) {
-  const [boards, setBoards] = useState<Board[] | null>(null);
+  const [boards, setBoards] = useState<BoardWithRole[] | null>(null);
   const [name, setName] = useState('');
   const [error, setError] = useState('');
 
@@ -73,6 +73,7 @@ export function BoardsPage({ session }: { session: Session }) {
               >
                 {b.name}
               </a>
+              <span className="role-badge">{b.role}</span>
               <time dateTime={b.createdAt}>{new Date(b.createdAt).toLocaleDateString()}</time>
             </li>
           ))}

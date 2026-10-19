@@ -11,9 +11,19 @@ interface Props {
   setDraggingId: (id: string | null) => void;
   editorsByCard: Map<string, { name: string; color: string }[]>;
   onOpenCard: (id: string) => void;
+  readOnly: boolean;
 }
 
-export function Column({ column, state, client, draggingId, setDraggingId, editorsByCard, onOpenCard }: Props) {
+export function Column({
+  column,
+  state,
+  client,
+  draggingId,
+  setDraggingId,
+  editorsByCard,
+  onOpenCard,
+  readOnly,
+}: Props) {
   const listRef = useRef<HTMLUListElement>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
@@ -75,8 +85,9 @@ export function Column({ column, state, client, draggingId, setDraggingId, edito
         ) : (
           // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard rename is tracked in TASKS.md (Phase 4, touch/keyboard + ARIA pass)
           <h2
-            title="Click to rename"
+            title={readOnly ? undefined : 'Click to rename'}
             onClick={() => {
+              if (readOnly) return;
               setName(column.name);
               setRenaming(true);
             }}
@@ -87,18 +98,20 @@ export function Column({ column, state, client, draggingId, setDraggingId, edito
         <span className="count" role="img" aria-label={`${cards.length} cards`}>
           {cards.length}
         </span>
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label={`Delete column ${column.name}`}
-          title="Delete column"
-          onClick={() => {
-            if (window.confirm(`Delete "${column.name}" and its ${cards.length} card(s)?`))
-              client.deleteColumn(column.id);
-          }}
-        >
-          ×
-        </button>
+        {!readOnly && (
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={`Delete column ${column.name}`}
+            title="Delete column"
+            onClick={() => {
+              if (window.confirm(`Delete "${column.name}" and its ${cards.length} card(s)?`))
+                client.deleteColumn(column.id);
+            }}
+          >
+            ×
+          </button>
+        )}
       </header>
 
       <ul
@@ -122,6 +135,7 @@ export function Column({ column, state, client, draggingId, setDraggingId, edito
                 <CardTile
                   card={card}
                   dragging={isDragged}
+                  readOnly={readOnly}
                   commentCount={selectComments(state, card.id).length}
                   editors={editorsByCard.get(card.id) ?? []}
                   onOpen={() => onOpenCard(card.id)}
@@ -138,7 +152,7 @@ export function Column({ column, state, client, draggingId, setDraggingId, edito
         {dropIndex !== null && dropIndex >= visibleCount && <li className="drop-line" aria-hidden />}
       </ul>
 
-      {adding ? (
+      {readOnly ? null : adding ? (
         <form
           className="add-card-form"
           onSubmit={(e) => {

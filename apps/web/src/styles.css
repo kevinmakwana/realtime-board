@@ -596,3 +596,41 @@ textarea {
     animation: none;
   }
 }
+
+/* ---------- sharing ---------- */
+.modal.share {
+  width: min(520px, 100%);
+}
+.members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.member-name {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+}
+.member-name small {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.role-badge {
+  font-size: 12px;
+  text-transform: capitalize;
+  color: var(--ink-soft);
+  background: var(--lane);
+  border-radius: 999px;
+  padding: 2px 10px;
+}
+.invite-form input {
+  flex: 1;
+  min-width: 0;
+}

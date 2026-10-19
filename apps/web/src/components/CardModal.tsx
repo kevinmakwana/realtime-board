@@ -7,10 +7,11 @@ interface Props {
   state: BoardState;
   client: BoardClient;
   editors: { name: string; color: string }[];
+  readOnly: boolean;
   onClose: () => void;
 }
 
-export function CardModal({ card, state, client, editors, onClose }: Props) {
+export function CardModal({ card, state, client, editors, readOnly, onClose }: Props) {
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description);
   const [comment, setComment] = useState('');
@@ -72,12 +73,17 @@ export function CardModal({ card, state, client, editors, onClose }: Props) {
           <input
             value={title}
             maxLength={200}
+            readOnly={readOnly}
             onChange={(e) => setTitle(e.target.value)}
-            onFocus={focus}
-            onBlur={() => {
-              blur();
-              save();
-            }}
+            onFocus={readOnly ? undefined : focus}
+            onBlur={
+              readOnly
+                ? undefined
+                : () => {
+                    blur();
+                    save();
+                  }
+            }
           />
         </label>
         <label className="field">
@@ -86,13 +92,18 @@ export function CardModal({ card, state, client, editors, onClose }: Props) {
             rows={5}
             value={description}
             maxLength={5000}
-            placeholder="Add more detail…"
+            placeholder={readOnly ? undefined : 'Add more detail…'}
+            readOnly={readOnly}
             onChange={(e) => setDescription(e.target.value)}
-            onFocus={focus}
-            onBlur={() => {
-              blur();
-              save();
-            }}
+            onFocus={readOnly ? undefined : focus}
+            onBlur={
+              readOnly
+                ? undefined
+                : () => {
+                    blur();
+                    save();
+                  }
+            }
           />
         </label>
 
@@ -109,48 +120,52 @@ export function CardModal({ card, state, client, editors, onClose }: Props) {
           ))}
           {comments.length === 0 && <li className="note">No comments yet.</li>}
         </ul>
-        <form
-          className="row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            client.addComment(card.id, comment);
-            setComment('');
-          }}
-        >
-          <input
-            aria-label="Write a comment"
-            placeholder="Write a comment"
-            value={comment}
-            maxLength={2000}
-            onChange={(e) => setComment(e.target.value)}
-            onFocus={focus}
-            onBlur={blur}
-          />
-          <button type="submit" className="btn primary">
-            Comment
-          </button>
-        </form>
-
-        <footer className="modal-foot">
-          <button
-            type="button"
-            className="btn danger"
-            onClick={() => {
-              client.deleteCard(card.id);
-              onClose();
+        {!readOnly && (
+          <form
+            className="row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              client.addComment(card.id, comment);
+              setComment('');
             }}
           >
-            Delete card
-          </button>
+            <input
+              aria-label="Write a comment"
+              placeholder="Write a comment"
+              value={comment}
+              maxLength={2000}
+              onChange={(e) => setComment(e.target.value)}
+              onFocus={focus}
+              onBlur={blur}
+            />
+            <button type="submit" className="btn primary">
+              Comment
+            </button>
+          </form>
+        )}
+
+        <footer className="modal-foot">
+          {!readOnly && (
+            <button
+              type="button"
+              className="btn danger"
+              onClick={() => {
+                client.deleteCard(card.id);
+                onClose();
+              }}
+            >
+              Delete card
+            </button>
+          )}
           <button
             type="button"
             className="btn"
             onClick={() => {
-              save();
+              if (!readOnly) save();
               onClose();
             }}
           >
-            Done
+            {readOnly ? 'Close' : 'Done'}
           </button>
         </footer>
       </div>

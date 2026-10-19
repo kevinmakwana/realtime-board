@@ -5,6 +5,7 @@ import type { BoardClient, BoardViewModel } from '../lib/boardClient';
 import { navigate } from '../router';
 import { CardModal } from './CardModal';
 import { Column } from './Column';
+import { ShareDialog } from './ShareDialog';
 import { Cursors } from './Cursors';
 import { PresenceBar } from './PresenceBar';
 import { Toasts } from './Toasts';
@@ -19,6 +20,8 @@ interface Props {
 export function BoardView({ client, vm, state, session }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const readOnly = vm.role === 'viewer';
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [addingColumn, setAddingColumn] = useState(false);
   const [columnName, setColumnName] = useState('');
@@ -34,7 +37,11 @@ export function BoardView({ client, vm, state, session }: Props) {
   );
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpenCardId(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setOpenCardId(null);
+      setSharing(false);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -55,6 +62,11 @@ export function BoardView({ client, vm, state, session }: Props) {
         </button>
         <h1 className="board-title">{state.board.name}</h1>
         <span className="spacer" />
+        {vm.role && (
+          <button type="button" className="btn" data-testid="share" onClick={() => setSharing(true)}>
+            Share
+          </button>
+        )}
         <PresenceBar members={vm.presence} selfUserId={session.user.id} />
         <span
           className={`conn ${vm.status}`}
@@ -83,43 +95,46 @@ export function BoardView({ client, vm, state, session }: Props) {
               setDraggingId={setDraggingId}
               editorsByCard={editorsByCard}
               onOpenCard={setOpenCardId}
+              readOnly={readOnly}
             />
           ))}
 
-          <div className="lane add-lane">
-            {addingColumn ? (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  client.createColumn(columnName);
-                  setColumnName('');
-                  setAddingColumn(false);
-                }}
-              >
-                <input
-                  autoFocus
-                  aria-label="Column name"
-                  placeholder="Column name"
-                  maxLength={60}
-                  value={columnName}
-                  onChange={(e) => setColumnName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Escape' && setAddingColumn(false)}
-                />
-                <div className="row">
-                  <button type="submit" className="btn primary">
-                    Add column
-                  </button>
-                  <button type="button" className="btn ghost" onClick={() => setAddingColumn(false)}>
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <button type="button" className="btn ghost add-column" onClick={() => setAddingColumn(true)}>
-                + Add column
-              </button>
-            )}
-          </div>
+          {!readOnly && (
+            <div className="lane add-lane">
+              {addingColumn ? (
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    client.createColumn(columnName);
+                    setColumnName('');
+                    setAddingColumn(false);
+                  }}
+                >
+                  <input
+                    autoFocus
+                    aria-label="Column name"
+                    placeholder="Column name"
+                    maxLength={60}
+                    value={columnName}
+                    onChange={(e) => setColumnName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Escape' && setAddingColumn(false)}
+                  />
+                  <div className="row">
+                    <button type="submit" className="btn primary">
+                      Add column
+                    </button>
+                    <button type="button" className="btn ghost" onClick={() => setAddingColumn(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button type="button" className="btn ghost add-column" onClick={() => setAddingColumn(true)}>
+                  + Add column
+                </button>
+              )}
+            </div>
+          )}
 
           <Cursors cursors={vm.cursors} members={vm.presence} />
         </div>
@@ -132,7 +147,16 @@ export function BoardView({ client, vm, state, session }: Props) {
           state={state}
           client={client}
           editors={editorsByCard.get(openCard.id) ?? []}
+          readOnly={readOnly}
           onClose={() => setOpenCardId(null)}
+        />
+      )}
+      {sharing && vm.role && (
+        <ShareDialog
+          boardId={state.board.id}
+          role={vm.role}
+          selfUserId={session.user.id}
+          onClose={() => setSharing(false)}
         />
       )}
       {openCardId && !openCard && <GoneNotice onDone={() => setOpenCardId(null)} />}
