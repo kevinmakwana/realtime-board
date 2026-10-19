@@ -19,6 +19,14 @@ const schema = z.object({
   /** Magic links one email address may be sent per hour, so nobody can flood an inbox. */
   MAGIC_LINK_PER_EMAIL_PER_HOUR: z.coerce.number().int().positive().default(5),
   WEB_ORIGIN: z.string().default('http://localhost:5180'),
+  /** SMTP connection URL, for example smtp://user:pass@smtp.example.com:587. Unset: emails are printed to the log. */
+  SMTP_URL: z
+    .string()
+    .optional()
+    .transform((v) => v || undefined)
+    .pipe(z.url().optional()),
+  /** The From header of every email the server sends. */
+  MAIL_FROM: z.string().min(3).default('Realtime Board <no-reply@localhost>'),
   /** Enables POST /api/auth/dev-login. Off by default in production. */
   AUTH_DEV_LOGIN: bool.optional(),
   /** Seconds a presence entry lives without a heartbeat (crashed clients/instances vanish after this). */

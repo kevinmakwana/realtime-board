@@ -10,6 +10,7 @@ import type {
 import type { PoolClient } from 'pg';
 import type { Pool } from './db.js';
 import { ServiceError } from './errors.js';
+import type { InviteNotifier } from './mailer.js';
 import { type Db, roleOf } from './roles.js';
 
 const ROLE_ORDER = `CASE m.role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END`;
@@ -19,6 +20,7 @@ export class MembershipService {
   constructor(
     private readonly pool: Pool,
     private readonly onAccessChanged: (change: AccessChange) => void,
+    private readonly notifyInvite: InviteNotifier = () => {},
   ) {}
 
   /** The actor's role; a non-member sees the same "not found" as for a board that does not exist. */
@@ -86,11 +88,12 @@ export class MembershipService {
     const found = await this.pool.query('SELECT id, name, color, email FROM users WHERE email = $1', [normalized]);
     const user = found.rows[0];
     if (user) {
-      await this.pool.query(
+      const added = await this.pool.query(
         `INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, $3)
          ON CONFLICT (board_id, user_id) DO NOTHING`,
         [boardId, user.id, role],
       );
+      if (added.rowCount) await this.announceInvite(boardId, actorId, user.email, role);
       await this.pool.query('DELETE FROM board_invites WHERE board_id = $1 AND email = $2', [boardId, normalized]);
       const current = (await roleOf(this.pool, boardId, user.id)) as Role;
       return { member: { userId: user.id, name: user.name, color: user.color, role: current, email: user.email } };
@@ -101,7 +104,18 @@ export class MembershipService {
        ON CONFLICT (board_id, email) DO UPDATE SET role = EXCLUDED.role`,
       [boardId, normalized, role, actorId],
     );
+    await this.announceInvite(boardId, actorId, normalized, role);
     return { invite: { email: normalized, role } };
+  }
+
+  /** Tells the invitee by email who invited them to what. Never fails the invitation itself. */
+  private async announceInvite(boardId: string, actorId: string, to: string, role: GrantableRole): Promise<void> {
+    const { rows } = await this.pool.query(
+      'SELECT u.name AS inviter, b.name AS board FROM users u, boards b WHERE u.id = $1 AND b.id = $2',
+      [actorId, boardId],
+    );
+    if (!rows[0]) return;
+    this.notifyInvite({ to, inviterName: rows[0].inviter, boardName: rows[0].board, boardId, role });
   }
 
   async setRole(boardId: string, actorId: string, userId: string, role: GrantableRole): Promise<void> {

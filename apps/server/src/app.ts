@@ -10,6 +10,7 @@ import type { Pool } from './db.js';
 import { ServiceError } from './errors.js';
 import { redisRateLimit } from './httpRateLimit.js';
 import type { Logger } from './logger.js';
+import { type Mailer, magicLinkMail } from './mailer.js';
 import type { MembershipService } from './membership.js';
 
 interface Deps {
@@ -18,6 +19,7 @@ interface Deps {
   redis: Redis;
   service: BoardService;
   membership: MembershipService;
+  mailer: Mailer;
   log: Logger;
 }
 
@@ -32,7 +34,7 @@ class HttpError extends Error {
   }
 }
 
-export function createApp({ config, pool, redis, service, membership, log }: Deps) {
+export function createApp({ config, pool, redis, service, membership, mailer, log }: Deps) {
   const app = express();
   app.disable('x-powered-by');
   // Without this, req.ip is the proxy's address and every client would share one rate-limit budget.
@@ -68,7 +70,7 @@ export function createApp({ config, pool, redis, service, membership, log }: Dep
     res.json({ token: signToken(user, config.JWT_SECRET), user: { id: user.id, name: user.name, color: user.color } });
   });
 
-  // Magic link: the "email" is printed to the server console instead of being sent.
+  // Magic link: emailed through the configured mailer (printed to the log when no SMTP server is set up).
   const magicLinkPerEmail = redisRateLimit(redis, {
     name: 'magic-link',
     limit: config.MAGIC_LINK_PER_EMAIL_PER_HOUR,
@@ -82,7 +84,12 @@ export function createApp({ config, pool, redis, service, membership, log }: Dep
   api.post('/auth/magic-link', magicLinkPerEmail, async (req, res) => {
     const { email } = emailSchema.parse(req.body);
     const link = await createMagicLink(redis, email, config.WEB_ORIGIN);
-    log(`\n  ✉  Magic link for ${email}\n     ${link}\n`);
+    try {
+      await mailer.send(magicLinkMail(email, link));
+    } catch (err) {
+      // Answer the same either way: the response must not reveal whether an address is deliverable.
+      log(`failed to send the sign-in link to ${email}: ${String(err)}`);
+    }
     res.json({ ok: true });
   });
 

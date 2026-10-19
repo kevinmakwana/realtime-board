@@ -11,6 +11,7 @@ import type { Config } from './config.js';
 import { createPool, migrate } from './db.js';
 import { attachGateway, type BoardServer, type SocketData } from './gateway.js';
 import { noopLogger, type Logger } from './logger.js';
+import { type Mailer, createInviteNotifier, createMailer } from './mailer.js';
 import { MembershipService } from './membership.js';
 import { Presence } from './presence.js';
 
@@ -26,7 +27,11 @@ export interface ServerInstance {
  * instances (Postgres, Redis) is reached through the config, so tests can run several of these in
  * a single process and the docker `scale` profile runs them as separate containers.
  */
-export async function createServerInstance(config: Config, log: Logger = noopLogger): Promise<ServerInstance> {
+export async function createServerInstance(
+  config: Config,
+  log: Logger = noopLogger,
+  deps: { mailer?: Mailer } = {},
+): Promise<ServerInstance> {
   const pool = createPool(config.DATABASE_URL);
   await migrate(pool);
 
@@ -37,9 +42,14 @@ export async function createServerInstance(config: Config, log: Logger = noopLog
   const service = new BoardService(pool);
   // The gateway is attached after the app exists, so the callback is bound late.
   let notifyAccess: (change: AccessChange) => void = () => {};
-  const membership = new MembershipService(pool, (change) => notifyAccess(change));
+  const mailer = deps.mailer ?? createMailer(config, log);
+  const membership = new MembershipService(
+    pool,
+    (change) => notifyAccess(change),
+    createInviteNotifier(mailer, config.WEB_ORIGIN, log),
+  );
   const presence = new Presence(redis, config.PRESENCE_TTL_SECONDS);
-  const app = createApp({ config, pool, redis, service, membership, log });
+  const app = createApp({ config, pool, redis, service, membership, mailer, log });
   const httpServer = createServer(app);
 
   const io: BoardServer = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(

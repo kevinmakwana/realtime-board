@@ -20,7 +20,7 @@ A collaborative kanban board where several people edit the same board at once an
 - **Reconnect catch-up.** Each board has a gapless event sequence. A client rejoins with its last seen `seq` and gets the missed events replayed from Postgres (or a fresh snapshot if it is too far behind).
 - **Horizontal scale.** `@socket.io/redis-adapter`, per-socket rate limiting, and a docker compose profile that runs two instances behind nginx with sticky sessions.
 - **Sharing and roles.** A board belongs to its members. The owner invites people by email as **editors** (can change the board) or **viewers** (read-only), from the Share dialog. Changing someone's role or removing them takes effect immediately, on every server instance, even for a tab that is already open. Invites for people without an account wait until they first sign in with that email.
-- **Simple auth.** One-click fictional demo logins, or an email magic link that is printed to the server console. No paid services anywhere.
+- **Simple auth.** One-click fictional demo logins, or an email magic link. Without an SMTP server the email is printed to the server console, so nothing paid is needed to run it.
 
 ## Architecture
 
@@ -69,7 +69,7 @@ npm run seed                # optional: a demo board with fictional people and c
 
 Open <http://localhost:5180> and sign in as a demo person. Open a second window in a private tab and sign in as someone else to see the sync.
 
-**Magic link instead:** enter any email on the sign-in page. The link is printed in the terminal running the server; open it in the browser to finish signing in. Links are single use and expire after 15 minutes.
+**Magic link instead:** enter any email on the sign-in page. With no `SMTP_URL` set, the email is printed in the terminal running the server; open the link in the browser to finish signing in. To see real emails locally, run a catcher such as `docker run -p 1025:1025 -p 8025:8025 axllent/mailpit` and set `SMTP_URL=smtp://localhost:1025`; they appear at <http://localhost:8025>. Links are single use and expire after 15 minutes.
 
 ### Run two instances behind nginx
 
@@ -156,7 +156,7 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 | Route | Purpose |
 | --- | --- |
 | `POST /api/auth/dev-login` | `{ email, name? }` returns a JWT. Disabled when `NODE_ENV=production` unless `AUTH_DEV_LOGIN=true`. All `/api/auth/*` routes answer `429` with `Retry-After` when rate limited. |
-| `POST /api/auth/magic-link` | `{ email }` prints a single-use link to the server console. |
+| `POST /api/auth/magic-link` | `{ email }` emails a single-use sign-in link (printed to the server console when no SMTP server is configured). Always answers `{ ok: true }`, whether or not the email could be delivered. |
 | `POST /api/auth/verify` | `{ token }` exchanges a magic-link token for a JWT. |
 | `GET /api/boards`, `POST /api/boards` | List your boards (each with your `role`) or create one (new boards get To do, In progress, Done; the creator is the owner). |
 | `GET /api/boards/:id` | Snapshot with its `seq`. Members only; anyone else gets `404`. |
@@ -205,6 +205,8 @@ docker/         nginx config for the scale profile
 | `TRUST_PROXY` | `0` | Number of reverse proxies in front of the server (nginx = 1). Needed for per-client rate limits to see real IPs |
 | `AUTH_RATE_LIMIT_PER_MIN` | `20` | Requests per client IP per minute across `/api/auth/*` |
 | `MAGIC_LINK_PER_EMAIL_PER_HOUR` | `5` | Magic links one address can be sent per hour |
+| `SMTP_URL` | unset | For example `smtp://user:pass@smtp.example.com:587` (`smtps://` for TLS). Unset: emails are printed to the log. The server warns at start-up if this is unset in production |
+| `MAIL_FROM` | `Realtime Board <no-reply@localhost>` | The From address of sign-in and invitation emails |
 | `PRESENCE_TTL_SECONDS` | `30` | |
 | `RATE_LIMIT_PER_SEC` / `RATE_LIMIT_BURST` | `20` / `40` | Commands per socket |
 | `CURSOR_RATE_PER_SEC` | `30` | |
