@@ -1,7 +1,8 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { applyEvents, stateFromSnapshot, SeqBuffer } from '@board/shared';
 import type { ServerInstance } from '../src/server.js';
-import { addCard, collectEvents, createWorld, emit, join, startPair, type TestWorld } from './helpers.js';
+import { addCard, collectEvents, createWorld, emit, join, startPair, type TestWorld, waitFor } from './helpers.js';
 
 describe('reconnect catch-up', () => {
   const world: TestWorld = createWorld();
@@ -91,5 +92,45 @@ describe('reconnect catch-up', () => {
     expect(await join(s2, snap.board.id, 1)).toMatchObject({ ok: true, mode: 'replay', events: [], seq: 1 });
     const s3 = await world.connect(a.port, ada.token);
     expect(await join(s3, snap.board.id, 99)).toMatchObject({ ok: true, mode: 'snapshot' });
+  });
+
+  it('treats a repeated join from the same socket as a resync: presence is kept and the roster is not rebroadcast', async () => {
+    const ada = await world.newUser('Ada');
+    const grace = await world.newUser('Grace');
+    const snap = await world.newBoard(ada.id, [grace.id]);
+    const sa = await world.connect(a.port, ada.token);
+    const sg = await world.connect(b.port, grace.token);
+    await join(sa, snap.board.id);
+    const first = await join(sg, snap.board.id);
+    const cardId = randomUUID();
+
+    const editing = waitFor(sa, 'presence:update', (p) =>
+      p.members.some((m) => m.user.id === grace.id && m.editingCardId === cardId),
+    );
+    await emit(sg, 'presence:editing', { boardId: snap.board.id, cardId });
+    await editing;
+
+    let rosterBroadcasts = 0;
+    sa.on('presence:update', () => rosterBroadcasts++);
+    const lastSeq = first.ok && first.mode === 'snapshot' ? first.snapshot.seq : 0;
+    const again = await join(sg, snap.board.id, lastSeq);
+
+    expect(again).toMatchObject({ ok: true, mode: 'replay', events: [] });
+    const me = again.ok ? again.presence.find((m) => m.user.id === grace.id) : undefined;
+    expect(me?.editingCardId).toBe(cardId); // the resync did not wipe "is editing"
+    await new Promise((r) => setTimeout(r, 300));
+    expect(rosterBroadcasts).toBe(0);
+  });
+
+  it('puts a socket back on the roster if its presence entry vanished (for example a Redis flush)', async () => {
+    const ada = await world.newUser('Ada');
+    const snap = await world.newBoard(ada.id);
+    const sa = await world.connect(a.port, ada.token);
+    const first = await join(sa, snap.board.id);
+    expect(first).toMatchObject({ ok: true });
+    await world.redis.del(`presence:${snap.board.id}:${sa.id}`);
+
+    const again = await join(sa, snap.board.id, 0);
+    expect(again.ok && again.presence.map((m) => m.user.id)).toEqual([ada.id]);
   });
 });
