@@ -134,8 +134,8 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
     command(
       'board:join',
       async ({ boardId, lastSeq }) => {
-        const role = await service.role(boardId, user.id);
-        if (!role) throw new ServiceError('NOT_FOUND', 'Board not found');
+        // Cheap early refusal; re-checked below once this socket can receive access changes.
+        if (!(await service.role(boardId, user.id))) throw new ServiceError('NOT_FOUND', 'Board not found');
         const head = await service.latestSeq(boardId);
         if (head === null) throw new ServiceError('NOT_FOUND', 'Board not found');
 
@@ -143,6 +143,14 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
         // and the client de-duplicates by seq, so we can neither miss nor double-apply an event.
         await socket.join(roomOf(boardId));
         socket.data.boards.add(boardId);
+        // applyAccessLocal skips sockets that are not on the board yet, so a removal or downgrade that
+        // landed since the check above was missed. From here on every change reaches us; read the
+        // role again to pick up anything we missed, and use it (not the stale one) in the ack.
+        const role = await service.role(boardId, user.id);
+        if (!role) {
+          await leaveBoard(socket, boardId);
+          throw new ServiceError('NOT_FOUND', 'Board not found');
+        }
         const member: PresenceMember = {
           socketId: socket.id,
           user,
