@@ -3,6 +3,7 @@ import type { Card } from '@board/shared';
 interface Props {
   card: Card;
   dragging: boolean;
+  readOnly: boolean;
   commentCount: number;
   editors: { name: string; color: string }[];
   onOpen: () => void;
@@ -10,14 +11,14 @@ interface Props {
   onDragEnd: () => void;
 }
 
-export function CardTile({ card, dragging, commentCount, editors, onOpen, onDragStart, onDragEnd }: Props) {
+export function CardTile({ card, dragging, readOnly, commentCount, editors, onOpen, onDragStart, onDragEnd }: Props) {
   const editing = editors[0];
   return (
     <article
       className={`card${editing ? ' being-edited' : ''}${dragging ? ' dragging' : ''}`}
       data-card-id={card.id}
       data-testid="card"
-      draggable
+      draggable={!readOnly}
       // biome-ignore lint/a11y/noNoninteractiveTabindex: the card is a focusable control; Enter and Space open it (onKeyDown below)
       tabIndex={0}
       style={editing ? ({ '--editor': editing.color } as React.CSSProperties) : undefined}

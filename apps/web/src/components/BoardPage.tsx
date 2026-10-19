@@ -38,6 +38,19 @@ function ConnectedBoard({ client, session }: { client: BoardClient; session: Ses
     if (vm.status === 'unauthorized') setSession(null);
   }, [vm.status]);
 
+  if (vm.status === 'removed') {
+    return (
+      <div className="page center">
+        <p role="status" data-testid="no-access">
+          You no longer have access to this board.
+        </p>
+        <button type="button" className="btn primary" onClick={() => navigate('/')}>
+          Back to boards
+        </button>
+      </div>
+    );
+  }
+
   if (!vm.state) {
     return (
       <div className="page center">
