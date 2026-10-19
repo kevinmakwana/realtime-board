@@ -16,6 +16,8 @@ x-server: &server
     # keeps the dev JWT_SECRET from your .env out of this profile. Set COMPOSE_JWT_SECRET for anything shared.
     JWT_SECRET: ${COMPOSE_JWT_SECRET:-compose-demo-secret-do-not-use-in-prod}
     TRUST_PROXY: "1" # nginx is the one proxy in front of the instances
+    SMTP_URL: ${SMTP_URL:-} # unset: emails are printed to the container log
+    MAIL_FROM: ${MAIL_FROM:-Realtime Board <no-reply@localhost>}
     WEB_ORIGIN: http://localhost:${NGINX_PORT:-8088}
     AUTH_DEV_LOGIN: "true" # demo only: lets the sign-in page offer one-click fictional personas
   depends_on:
