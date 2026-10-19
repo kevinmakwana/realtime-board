@@ -70,7 +70,7 @@ services:
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     ports:
       - "${REDIS_PORT:-6381}:6379"
     healthcheck:
