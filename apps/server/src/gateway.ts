@@ -139,6 +139,10 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
         const head = await service.latestSeq(boardId);
         if (head === null) throw new ServiceError('NOT_FOUND', 'Board not found');
 
+        // A second join from a socket that is already on the board is a resync (reconnect catch-up and
+        // the client's periodic check): it must not reset presence or re-announce the roster.
+        const alreadyOnBoard = socket.data.boards.has(boardId);
+
         // Join the room BEFORE reading state: anything committed meanwhile is also broadcast to us,
         // and the client de-duplicates by seq, so we can neither miss nor double-apply an event.
         await socket.join(roomOf(boardId));
@@ -151,14 +155,19 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
           await leaveBoard(socket, boardId);
           throw new ServiceError('NOT_FOUND', 'Board not found');
         }
-        const member: PresenceMember = {
-          socketId: socket.id,
-          user,
-          instance,
-          editingCardId: null,
-          joinedAt: Date.now(),
-        };
-        await presence.join(boardId, member);
+        // Keep our existing roster entry (and its "is editing" state) unless it has vanished.
+        let members = alreadyOnBoard ? await presence.list(boardId) : [];
+        const needsAnnouncing = !alreadyOnBoard || !members.some((m) => m.socketId === socket.id);
+        if (needsAnnouncing) {
+          const member: PresenceMember = {
+            socketId: socket.id,
+            user,
+            instance,
+            editingCardId: null,
+            joinedAt: Date.now(),
+          };
+          await presence.join(boardId, member);
+        }
 
         let result: Pick<JoinAck & { ok: true }, 'mode'> & Record<string, unknown>;
         const behind = lastSeq !== undefined ? head - lastSeq : null;
@@ -174,7 +183,7 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
           result = { mode: 'snapshot', snapshot: (await service.getSnapshot(boardId))! };
         }
 
-        const members = await broadcastPresence(boardId);
+        if (needsAnnouncing) members = await broadcastPresence(boardId);
         return { ...result, instance, presence: members, role };
       },
       { requireJoined: false },

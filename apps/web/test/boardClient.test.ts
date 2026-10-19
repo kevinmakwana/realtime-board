@@ -89,7 +89,10 @@ async function setup(seq = 3, role: 'owner' | 'editor' | 'viewer' = 'editor') {
 const colIds = (client: BoardClient, col: string) => selectCards(client.getSnapshot().state!, col).map((c) => c.id);
 
 beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe('BoardClient', () => {
   it('joins on connect, loads the snapshot and reports the serving instance', async () => {
@@ -293,6 +296,89 @@ describe('roles', () => {
     const { socket, client } = await setup(3, 'editor');
     socket.fire('disconnect');
     socket.fire('connect');
+    socket.last('board:join').ack!(null, { ok: false, code: 'NOT_FOUND', message: 'Board not found' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().status).toBe('removed');
+  });
+});
+
+describe('healing lost broadcasts', () => {
+  /** The ack the server sends when we are caught up: an empty replay. */
+  const upToDate = (seq: number, events: BoardEvent[] = []) => ({
+    ok: true,
+    mode: 'replay',
+    events,
+    seq,
+    instance: 'server-1',
+    presence: [],
+    role: 'editor',
+  });
+
+  it('asks the server where the log is every so often, even when nothing arrives', async () => {
+    const { socket } = await setup(3);
+    expect(socket.count('board:join')).toBe(1);
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(socket.count('board:join')).toBe(2);
+    expect(socket.last('board:join').payload).toMatchObject({ lastSeq: 3 });
+  });
+
+  it('keeps checking: each answered check schedules the next', async () => {
+    const { socket } = await setup(3);
+    for (let i = 2; i <= 4; i++) {
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(socket.count('board:join')).toBe(i);
+      socket.last('board:join').ack!(null, upToDate(3));
+      await vi.advanceTimersByTimeAsync(0);
+    }
+  });
+
+  it('applies an event the broadcast lost, without ever looking offline', async () => {
+    const { socket, client } = await setup(3);
+    await vi.advanceTimersByTimeAsync(40_000);
+    // While the check is in flight the board still accepts edits.
+    client.createCard(COL_A, 'During the check');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.count('card:create')).toBe(1);
+    expect(client.getSnapshot().status).toBe('live');
+
+    const missed = event(4, card(1, COL_B, 'a0', 2));
+    socket.last('board:join').ack!(null, upToDate(4, [missed]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(colIds(client, COL_B)).toContain(uid(101));
+    expect(client.getSnapshot().state?.seq).toBe(4);
+    expect(client.getSnapshot().status).toBe('live');
+  });
+
+  it('checks as soon as the tab becomes visible again', async () => {
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('document', doc);
+    const { socket } = await setup(3);
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(socket.count('board:join')).toBe(2);
+
+    doc.visibilityState = 'hidden';
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(socket.count('board:join')).toBe(2); // hiding the tab asks nothing
+  });
+
+  it('does not check while disconnected or after the client is disposed', async () => {
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'visible' });
+    vi.stubGlobal('document', doc);
+    const { socket, client } = await setup(3);
+    socket.fire('disconnect');
+    await vi.advanceTimersByTimeAsync(120_000);
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(socket.count('board:join')).toBe(1);
+
+    client.dispose();
+    doc.dispatchEvent(new Event('visibilitychange'));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(socket.count('board:join')).toBe(1);
+  });
+
+  it('shows "removed" if a check finds the board is no longer accessible', async () => {
+    const { socket, client } = await setup(3);
+    await vi.advanceTimersByTimeAsync(40_000);
     socket.last('board:join').ack!(null, { ok: false, code: 'NOT_FOUND', message: 'Board not found' });
     await vi.advanceTimersByTimeAsync(0);
     expect(client.getSnapshot().status).toBe('removed');

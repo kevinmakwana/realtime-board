@@ -64,6 +64,9 @@ const ACK_TIMEOUT_MS = 8000;
 const GAP_RESYNC_MS = 400;
 const CURSOR_SEND_INTERVAL_MS = 50;
 const CURSOR_IDLE_MS = 8000;
+/** How often a live client asks the server for anything it missed (plus up to HEAL_JITTER_MS so clients spread out). */
+const HEAL_INTERVAL_MS = 30_000;
+const HEAL_JITTER_MS = 5_000;
 
 /**
  * Client-side sync engine for one board, independent of React.
@@ -88,6 +91,7 @@ export class BoardClient {
   private lastCursorSent = 0;
   private queuedCursor: { x: number; y: number } | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | undefined;
+  private healTimer: ReturnType<typeof setTimeout> | undefined;
 
   private listeners = new Set<Listener>();
   private noticeListeners = new Set<(n: Notice) => void>();
@@ -136,6 +140,7 @@ export class BoardClient {
       this.update({ role: p.role });
     });
     this.pruneTimer = setInterval(() => this.pruneCursors(), 2000);
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.onVisibilityChange);
     if (socket.connected) void this.join();
   }
 
@@ -174,6 +179,8 @@ export class BoardClient {
     clearTimeout(this.gapTimer);
     clearTimeout(this.cursorTimer);
     clearInterval(this.pruneTimer);
+    clearTimeout(this.healTimer);
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibilityChange);
     if (this.joined) this.socket.emit('board:leave', { boardId: this.boardId });
     this.socket.off();
     this.socket.disconnect();
@@ -182,8 +189,13 @@ export class BoardClient {
 
   /* ---------------- join, replay, catch-up ---------------- */
 
-  private async join(): Promise<void> {
-    this.joined = false;
+  /**
+   * Join the board, or re-join to catch up. A `quiet` join is the periodic check: the board stays
+   * usable while it is in flight and a failed attempt is simply tried again later, because a real
+   * outage is reported by the socket's own disconnect.
+   */
+  private async join(quiet = false): Promise<void> {
+    if (!quiet) this.joined = false;
     const lastSeq = this.auth ? this.buffer.seq : undefined;
     let ack: JoinAck;
     try {
@@ -192,13 +204,17 @@ export class BoardClient {
         ...(lastSeq !== undefined && { lastSeq }),
       })) as JoinAck;
     } catch {
-      this.update({ status: 'reconnecting' });
+      if (quiet) this.scheduleHeal();
+      else this.update({ status: 'reconnecting' });
       return;
     }
     if (!ack.ok) {
       // A board we cannot join is one we were removed from (or that never existed): say so, do not retry.
       if (ack.code === 'NOT_FOUND') this.update({ status: 'removed', role: null });
-      else this.notice('error', ack.message);
+      else {
+        this.notice('error', ack.message);
+        if (quiet) this.scheduleHeal();
+      }
       return;
     }
     if (ack.mode === 'snapshot') {
@@ -208,9 +224,29 @@ export class BoardClient {
       this.ingest(ack.events);
     }
     this.joined = true;
-    this.cursors.clear();
+    if (!quiet) this.cursors.clear();
     this.update({ status: 'live', instance: ack.instance, presence: ack.presence, role: ack.role });
+    this.scheduleHeal();
   }
+
+  /**
+   * Broadcasts are at-most-once, and a hole is normally noticed only when a later event arrives. On a
+   * quiet board that could be never, so ask the server where the log is: it answers with an empty
+   * replay when we are current, or the events we missed.
+   */
+  private scheduleHeal(): void {
+    clearTimeout(this.healTimer);
+    this.healTimer = setTimeout(() => this.heal(), HEAL_INTERVAL_MS + Math.random() * HEAL_JITTER_MS);
+  }
+
+  private heal(): void {
+    // A disconnected client re-joins from its 'connect' handler instead.
+    if (this.joined) void this.join(true);
+  }
+
+  private onVisibilityChange = (): void => {
+    if (document.visibilityState === 'visible') this.heal();
+  };
 
   /** Feed sequenced events through the reorder buffer, apply what is ready, resync if a hole persists. */
   private ingest(events: readonly BoardEvent[]): void {
@@ -230,6 +266,7 @@ export class BoardClient {
 
   private onDisconnect(): void {
     this.joined = false;
+    clearTimeout(this.healTimer);
     // In-flight commands have an unknown outcome; drop the optimistic layer and let catch-up show the truth.
     this.pending = [];
     this.chains.clear();
