@@ -19,6 +19,7 @@ A collaborative kanban board where several people edit the same board at once an
 - **Presence.** Who is on the board, throttled live cursors, and "X is editing" on the card. Presence lives in Redis with a TTL, so a crashed browser or server disappears on its own.
 - **Reconnect catch-up.** Each board has a gapless event sequence. A client rejoins with its last seen `seq` and gets the missed events replayed from Postgres (or a fresh snapshot if it is too far behind).
 - **Horizontal scale.** `@socket.io/redis-adapter`, per-socket rate limiting, and a docker compose profile that runs two instances behind nginx with sticky sessions.
+- **Sharing and roles.** A board belongs to its members. The owner invites people by email as **editors** (can change the board) or **viewers** (read-only), from the Share dialog. Changing someone's role or removing them takes effect immediately, on every server instance, even for a tab that is already open. Invites for people without an account wait until they first sign in with that email.
 - **Simple auth.** One-click fictional demo logins, or an email magic link that is printed to the server console. No paid services anywhere.
 
 ## Architecture
@@ -111,7 +112,7 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 
 | Event | Payload | Ack | Notes |
 | --- | --- | --- | --- |
-| `board:join` | `{ boardId, lastSeq? }` | `{ mode: 'snapshot', snapshot }` or `{ mode: 'replay', events, seq }`, plus `instance`, `presence` | Joins the room first, then reads state. Replays only if the log is contiguous and within `REPLAY_MAX_EVENTS`. |
+| `board:join` | `{ boardId, lastSeq? }` | `{ mode: 'snapshot', snapshot }` or `{ mode: 'replay', events, seq }`, plus `instance`, `presence`, `role` | Joins the room first, then reads state. Replays only if the log is contiguous and within `REPLAY_MAX_EVENTS`. Non-members get `NOT_FOUND`. |
 | `board:leave` | `{ boardId }` | `{}` | |
 | `column:create` | `{ id, boardId, name, position }` | `{ seq }` | Client-generated ids make retries idempotent. |
 | `column:rename` | `{ id, boardId, name }` | `{ seq }` | |
@@ -131,6 +132,7 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 | `board:event` | `{ seq, type, boardId, actorId, ts, ... }` | One per committed change, sent to every socket in the board room on every instance. |
 | `presence:update` | `{ boardId, members[] }` | Full roster: socket, user, instance, `editingCardId`. |
 | `presence:cursor` | `{ socketId, userId, boardId, x, y }` | Not sent back to the sender. |
+| `board:access` | `{ boardId, role }` | Your role changed; `role` is `null` when you were removed from the board (the server also takes you out of its room). |
 
 `board:event` types: `column.created`, `column.updated`, `column.deleted`, `card.created`, `card.updated`, `card.moved`, `card.deleted`, `comment.added`. Card events carry the full card, so applying them is idempotent.
 
@@ -142,7 +144,8 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 | --- | --- |
 | `VALIDATION` | Payload failed the zod schema (the message lists the fields). |
 | `VERSION_CONFLICT` | Someone changed the card first. The ack includes `current` so the client can resync. |
-| `NOT_FOUND` | Board, column or card does not exist (or was just deleted). |
+| `NOT_FOUND` | Board, column or card does not exist (or was just deleted), or you are not a member of the board. |
+| `FORBIDDEN` | You are a viewer and tried to write. |
 | `NOT_JOINED` | The socket has not joined that board. |
 | `RATE_LIMITED` | The socket's token bucket is empty. |
 | `UNAUTHORIZED` | Handshake rejected (bad or missing JWT). |
@@ -155,9 +158,14 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 | `POST /api/auth/dev-login` | `{ email, name? }` returns a JWT. Disabled when `NODE_ENV=production` unless `AUTH_DEV_LOGIN=true`. All `/api/auth/*` routes answer `429` with `Retry-After` when rate limited. |
 | `POST /api/auth/magic-link` | `{ email }` prints a single-use link to the server console. |
 | `POST /api/auth/verify` | `{ token }` exchanges a magic-link token for a JWT. |
-| `GET /api/boards`, `POST /api/boards` | List or create boards (new boards get To do, In progress, Done). |
-| `GET /api/boards/:id` | Snapshot with its `seq`. |
-| `GET /api/boards/:id/events?after=N` | Event log slice. |
+| `GET /api/boards`, `POST /api/boards` | List your boards (each with your `role`) or create one (new boards get To do, In progress, Done; the creator is the owner). |
+| `GET /api/boards/:id` | Snapshot with its `seq`. Members only; anyone else gets `404`. |
+| `GET /api/boards/:id/events?after=N` | Event log slice. Members only. |
+| `GET /api/boards/:id/members` | Members with names, colours and roles. The owner also gets emails and pending invites. |
+| `POST /api/boards/:id/members` | Owner only. `{ email, role: 'editor' \| 'viewer' }`. An existing user is added at once, anyone else gets a pending invite. |
+| `PATCH /api/boards/:id/members/:userId` | Owner only. `{ role }`. The owner's own role cannot change. |
+| `DELETE /api/boards/:id/members/:userId` | The owner removes anyone but themselves; any other member can remove themselves (leave). |
+| `DELETE /api/boards/:id/invites/:email` | Owner only. Withdraw a pending invite. |
 | `GET /health` | `{ ok, instance }`. |
 
 ## Scaling notes
@@ -171,7 +179,8 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 - **Rate limiting.** One token bucket per socket for commands (default 20/s sustained, burst 40) and a separate one for cursors (30/s). A noisy socket gets `RATE_LIMITED` acks and does not affect others. The limits are per instance process, which is per socket, so they do not need Redis.
 - **HTTP hardening.** `/api/auth/*` is rate limited per client IP, and magic links are also limited per email address. Both limiters count in Redis, so the budget is shared by every instance, and they fail open if Redis is unreachable. Helmet sets the standard security headers. Set `TRUST_PROXY` to the number of proxies in front of the server (the compose profile uses 1); leaving it at 0 means a spoofed `X-Forwarded-For` cannot dodge a limit.
 - **Throttling on the client.** Cursor packets go out at most every 50 ms and always end on the latest position.
-- **Known limits.** Any signed-in user can open any board (this is a demo, there is no sharing model). The event log is never compacted. Comments are loaded with the snapshot, which is fine for small boards but would need paging for large ones.
+- **Access control.** Every command re-reads the actor's role inside the same board-locked transaction that writes the event, so a removal or downgrade that has committed is always seen by the next write. Live sockets learn about the change through `io.serverSideEmit` (delivered by the Redis adapter), and a removed socket leaves the board room and the presence roster. Non-members get the same answer as for a board that does not exist, so ids do not leak.
+- **Known limits.** The event log is never compacted. Comments are loaded with the snapshot, which is fine for small boards but would need paging for large ones.
 
 ## Project layout
 

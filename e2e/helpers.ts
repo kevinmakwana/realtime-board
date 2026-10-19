@@ -16,3 +16,22 @@ export async function addCard(page: Page, column: string, title: string) {
   await lane.getByLabel('Card title').press('Enter');
   await lane.getByRole('button', { name: 'Done', exact: true }).click();
 }
+
+/** Invites someone through the REST API as the signed-in user of `page`. */
+export async function inviteViaApi(
+  page: Page,
+  origin: string,
+  boardPath: string,
+  email: string,
+  role: 'editor' | 'viewer',
+) {
+  const token = await page.evaluate(
+    () => (JSON.parse(localStorage.getItem('realtime-board.session') ?? 'null') as { token: string } | null)?.token,
+  );
+  const boardId = boardPath.split('/').at(-1);
+  const res = await page.request.post(`${origin}/api/boards/${boardId}/members`, {
+    headers: { authorization: `Bearer ${token}` },
+    data: { email, role },
+  });
+  expect(res.ok()).toBe(true);
+}
