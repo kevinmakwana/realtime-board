@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { E2E } from '../playwright.config';
-import { addCard, card, cardsIn, signInAs } from './helpers';
+import { addCard, card, cardsIn, inviteViaApi, signInAs } from './helpers';
 
 /**
  * Ada is on web-a -> server-a, Grace is on web-b -> server-b: two browser contexts, two server
@@ -18,6 +18,7 @@ async function openSharedBoard(browser: import('@playwright/test').Browser) {
   await expect(ada.getByTestId('lanes')).toBeVisible();
   const path = new URL(ada.url()).pathname;
 
+  await inviteViaApi(ada, E2E.webA, path, 'grace@example.test', 'editor');
   await signInAs(grace, E2E.webB, 'Grace Hopper');
   await grace.goto(`${E2E.webB}${path}`);
   await expect(grace.getByTestId('lanes')).toBeVisible();

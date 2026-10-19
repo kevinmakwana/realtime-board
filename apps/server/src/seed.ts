@@ -46,6 +46,12 @@ for (const [email, name] of people) users.push(await upsertUser(pool, email, nam
 const owner = users[0]!;
 
 const snap = await service.createBoard(owner.id, 'Product Launch (demo)');
+for (const person of users.slice(1)) {
+  await pool.query(
+    "INSERT INTO board_members (board_id, user_id, role) VALUES ($1, $2, 'editor') ON CONFLICT DO NOTHING",
+    [snap.board.id, person.id],
+  );
+}
 for (const col of snap.columns) {
   const items = cards[col.name] ?? [];
   const positions = keysBetween(null, null, items.length);

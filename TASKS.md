@@ -21,9 +21,10 @@
   - Verified: new unit test in apps/web/test/boardClient.test.ts (failed first), file apps/web/src/lib/boardClient.ts
 
 ### Phase 2: Safe to expose
-- [ ] **Board membership and roles** - enforce on `board:join`, every REST board route, and `GET /api/boards` (filter to boards the user belongs to). Use the existing `boards.owner_id`; add a `board_members` migration
-  - Priority 27 (I4 R5 E3). Do this before any sharing feature
-  - Files: apps/server/src/migrations.ts, boardService.ts, gateway.ts, app.ts
+- [x] ~~**Board membership and roles**~~ (2026-10-19)
+  - `board_members` + `board_invites` (migration 2, owner backfill), owner/editor/viewer, invite by email claimed at sign-in, role re-checked inside every command's board-locked transaction, live revocation across instances via `serverSideEmit`, Share dialog and read-only viewer mode
+  - Spec: docs/superpowers/specs/2026-10-18-board-membership-design.md; plan: docs/superpowers/plans/2026-10-19-board-membership.md
+  - Verified: 59 unit, integration (membership, members, REST matrix, two-instance access), 4 e2e including a sharing flow
 - [ ] **Real magic-link email** - provider interface with a console fallback for dev; configurable via env
   - Priority 28 (I4 R3 E2). Files: apps/server/src/auth.ts, app.ts
 - [ ] **Observability** - structured logging (replace `console.log` logger), `/ready` that checks Postgres + Redis (keep `/health` as liveness), basic metrics endpoint
