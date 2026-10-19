@@ -7,9 +7,10 @@ import type {
   MembersResponse,
   Role,
 } from '@board/shared';
+import type { PoolClient } from 'pg';
 import type { Pool } from './db.js';
 import { ServiceError } from './errors.js';
-import { roleOf } from './roles.js';
+import { type Db, roleOf } from './roles.js';
 
 const ROLE_ORDER = `CASE m.role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END`;
 
@@ -21,20 +22,42 @@ export class MembershipService {
   ) {}
 
   /** The actor's role; a non-member sees the same "not found" as for a board that does not exist. */
-  private async requireRole(boardId: string, actorId: string): Promise<Role> {
-    const role = await roleOf(this.pool, boardId, actorId);
+  private async requireRole(db: Db, boardId: string, actorId: string): Promise<Role> {
+    const role = await roleOf(db, boardId, actorId);
     if (!role) throw new ServiceError('NOT_FOUND', 'Board not found');
     return role;
   }
 
-  private async requireOwner(boardId: string, actorId: string): Promise<void> {
-    if ((await this.requireRole(boardId, actorId)) !== 'owner') {
+  private async requireOwner(db: Db, boardId: string, actorId: string): Promise<void> {
+    if ((await this.requireRole(db, boardId, actorId)) !== 'owner') {
       throw new ServiceError('FORBIDDEN', 'Only the board owner can do that');
     }
   }
 
+  /**
+   * Runs `fn` in a transaction holding the board row lock, the same lock every command takes. A role
+   * change therefore waits for commands already past their role check and commits before any later
+   * one: no write can land after the change that revoked it.
+   */
+  private async inBoardLock<T>(boardId: string, fn: (tx: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const lock = await client.query('SELECT 1 FROM boards WHERE id = $1 FOR UPDATE', [boardId]);
+      if (!lock.rowCount) throw new ServiceError('NOT_FOUND', 'Board not found');
+      const out = await fn(client);
+      await client.query('COMMIT');
+      return out;
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async listMembers(boardId: string, actorId: string): Promise<MembersResponse> {
-    const actor = await this.requireRole(boardId, actorId);
+    const actor = await this.requireRole(this.pool, boardId, actorId);
     const { rows } = await this.pool.query(
       `SELECT m.user_id, m.role, u.name, u.color, u.email
          FROM board_members m JOIN users u ON u.id = m.user_id
@@ -57,7 +80,7 @@ export class MembershipService {
   }
 
   async addMember(boardId: string, actorId: string, email: string, role: GrantableRole): Promise<AddMemberResult> {
-    await this.requireOwner(boardId, actorId);
+    await this.requireOwner(this.pool, boardId, actorId);
     const normalized = email.trim().toLowerCase();
 
     const found = await this.pool.query('SELECT id, name, color, email FROM users WHERE email = $1', [normalized]);
@@ -82,33 +105,39 @@ export class MembershipService {
   }
 
   async setRole(boardId: string, actorId: string, userId: string, role: GrantableRole): Promise<void> {
-    await this.requireOwner(boardId, actorId);
-    const current = await roleOf(this.pool, boardId, userId);
-    if (!current) throw new ServiceError('NOT_FOUND', 'That person is not on this board');
-    if (current === 'owner') throw new ServiceError('FORBIDDEN', 'The owner role cannot be changed');
-    await this.pool.query('UPDATE board_members SET role = $3 WHERE board_id = $1 AND user_id = $2', [
-      boardId,
-      userId,
-      role,
-    ]);
-    if (current !== role) this.onAccessChanged({ boardId, userId, role });
+    const changed = await this.inBoardLock(boardId, async (tx) => {
+      await this.requireOwner(tx, boardId, actorId);
+      const current = await roleOf(tx, boardId, userId);
+      if (!current) throw new ServiceError('NOT_FOUND', 'That person is not on this board');
+      if (current === 'owner') throw new ServiceError('FORBIDDEN', 'The owner role cannot be changed');
+      await tx.query('UPDATE board_members SET role = $3 WHERE board_id = $1 AND user_id = $2', [
+        boardId,
+        userId,
+        role,
+      ]);
+      return current !== role;
+    });
+    if (changed) this.onAccessChanged({ boardId, userId, role });
   }
 
   /** The owner can remove anyone but themselves; every other member can remove only themselves (leave). */
   async removeMember(boardId: string, actorId: string, userId: string): Promise<void> {
-    const actor = await this.requireRole(boardId, actorId);
-    if (actorId !== userId && actor !== 'owner') {
-      throw new ServiceError('FORBIDDEN', 'Only the board owner can remove other people');
-    }
-    const target = await roleOf(this.pool, boardId, userId);
-    if (!target) throw new ServiceError('NOT_FOUND', 'That person is not on this board');
-    if (target === 'owner') throw new ServiceError('FORBIDDEN', 'The owner cannot be removed from their board');
-    await this.pool.query('DELETE FROM board_members WHERE board_id = $1 AND user_id = $2', [boardId, userId]);
+    await this.inBoardLock(boardId, async (tx) => {
+      const actor = await this.requireRole(tx, boardId, actorId);
+      if (actorId !== userId && actor !== 'owner') {
+        throw new ServiceError('FORBIDDEN', 'Only the board owner can remove other people');
+      }
+      const target = await roleOf(tx, boardId, userId);
+      if (!target) throw new ServiceError('NOT_FOUND', 'That person is not on this board');
+      if (target === 'owner') throw new ServiceError('FORBIDDEN', 'The owner cannot be removed from their board');
+      await tx.query('DELETE FROM board_members WHERE board_id = $1 AND user_id = $2', [boardId, userId]);
+    });
+    // Only after COMMIT: sockets must never be told about a change that could still roll back.
     this.onAccessChanged({ boardId, userId, role: null });
   }
 
   async removeInvite(boardId: string, actorId: string, email: string): Promise<void> {
-    await this.requireOwner(boardId, actorId);
+    await this.requireOwner(this.pool, boardId, actorId);
     await this.pool.query('DELETE FROM board_invites WHERE board_id = $1 AND email = $2', [
       boardId,
       email.trim().toLowerCase(),

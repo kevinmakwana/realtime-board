@@ -121,4 +121,34 @@ describe('socket access control across two instances', () => {
     });
     expect(await join(se, snap.board.id)).toMatchObject({ ok: false, code: 'NOT_FOUND' });
   });
+
+  it('does not let a removal that lands mid-join be lost: the join is refused and the socket gets no events', async () => {
+    const ada = await world.newUser('Ada');
+    const ed = await world.newUser('Ed');
+    const snap = await world.newBoard(ada.id, [ed.id]);
+    const se = await world.connect(a.port, ed.token);
+    const so = await world.connect(b.port, ada.token);
+    await join(so, snap.board.id);
+    const seen = collectEvents(se);
+
+    // Stall the join after its role check (it reads `boards` next), then remove Ed meanwhile.
+    const blocker = await world.pool.connect();
+    await blocker.query('BEGIN');
+    await blocker.query('LOCK TABLE boards IN ACCESS EXCLUSIVE MODE');
+    const joining = join(se, snap.board.id);
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      await world.pool.query('DELETE FROM board_members WHERE board_id = $1 AND user_id = $2', [snap.board.id, ed.id]);
+      b.io.serverSideEmit('access:changed', { boardId: snap.board.id, userId: ed.id, role: null });
+      await new Promise((r) => setTimeout(r, 300));
+    } finally {
+      await blocker.query('COMMIT');
+      blocker.release();
+    }
+
+    expect(await joining).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    await emit(so, 'card:create', newCard(snap.board.id, snap.columns[0]!.id));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(seen).toHaveLength(0);
+  });
 });

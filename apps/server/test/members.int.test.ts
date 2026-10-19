@@ -182,3 +182,40 @@ describe('notifications', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe('ordering against in-flight commands', () => {
+  it('a removal waits for a command that already passed its role check, so no write lands after it', async () => {
+    const { members } = setup();
+    const { owner, editor, boardId } = await boardWith();
+    const columnId = (await world.pool.query('SELECT id FROM columns WHERE board_id = $1 LIMIT 1', [boardId])).rows[0]
+      .id as string;
+
+    // Stall the command right after its role check: it needs to read `cards` next.
+    const blocker = await world.pool.connect();
+    await blocker.query('BEGIN');
+    await blocker.query('LOCK TABLE cards IN ACCESS EXCLUSIVE MODE');
+    let removal: Promise<void> = Promise.resolve();
+    let command: ReturnType<typeof world.service.createCard>;
+    try {
+      command = world.service.createCard(editor.id, {
+        id: randomUUID(),
+        boardId,
+        columnId,
+        title: 'In flight',
+        position: 'a0',
+      });
+      await new Promise((r) => setTimeout(r, 250));
+
+      removal = members.removeMember(boardId, owner.id, editor.id);
+      await new Promise((r) => setTimeout(r, 300));
+      // The removal must queue behind the command instead of overtaking it.
+      expect(await world.service.role(boardId, editor.id)).toBe('editor');
+    } finally {
+      await blocker.query('COMMIT');
+      blocker.release();
+    }
+    await expect(command).resolves.toMatchObject({ seq: 1 });
+    await removal;
+    expect(await world.service.role(boardId, editor.id)).toBeNull();
+  });
+});
