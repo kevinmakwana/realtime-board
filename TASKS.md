@@ -25,12 +25,16 @@
   - `board_members` + `board_invites` (migration 2, owner backfill), owner/editor/viewer, invite by email claimed at sign-in, role re-checked inside every command's board-locked transaction, live revocation across instances via `serverSideEmit`, Share dialog and read-only viewer mode
   - Spec: docs/superpowers/specs/2026-10-18-board-membership-design.md; plan: docs/superpowers/plans/2026-10-19-board-membership.md
   - Verified: 59 unit, integration (membership, members, REST matrix, two-instance access), 4 e2e including a sharing flow
-- [ ] **Real magic-link email** - provider interface with a console fallback for dev; configurable via env
-  - Priority 28 (I4 R3 E2). Files: apps/server/src/auth.ts, app.ts
-- [ ] **Observability** - structured logging (replace `console.log` logger), `/ready` that checks Postgres + Redis (keep `/health` as liveness), basic metrics endpoint
-  - Priority 32 (I4 R4 E2). Files: apps/server/src/logger.ts, app.ts, docker-compose.yml healthchecks
-- [ ] **Heal lost broadcasts** - periodic or on-focus head-seq check so a client notices a missed event on a quiet board (today a hole is only noticed when a later event arrives)
-  - Priority 24 (I3 R3 E2). File: apps/web/src/lib/boardClient.ts. Add an integration test that drops one emit
+- [x] ~~**Real magic-link email**~~ (2026-10-20)
+  - `Mailer` interface: `ConsoleMailer` (default, prints the email) and `SmtpMailer` (nodemailer, when `SMTP_URL` is set; `MAIL_FROM` for the sender). Magic links and board invitations are emailed; a send failure is logged and never changes the response or fails the invite
+  - Verified: 9 unit tests (including real message rendering through a stream transport) and 5 integration tests through the real routes. Not tested against a live SMTP server
+- [x] ~~**Observability**~~ (2026-10-20)
+  - pino JSON logs in production (text in dev), request logging without query strings, `/ready` (Postgres + Redis, 2 s deadline, 503 on failure), `/metrics` (Prometheus: process, HTTP, sockets, commands by outcome), nginx proxies `/ready` and 404s `/metrics`, compose healthchecks use `/ready`
+  - Verified: unit + integration tests, and the scale profile (healthy via `/ready`, JSON logs, `/metrics` reachable in the container only)
+  - Used `@prometheus-io/client` because `prom-client` is deprecated in its favour
+- [x] ~~**Heal lost broadcasts**~~ (2026-10-20)
+  - A live client re-joins with its last seq every ~30 s (+ jitter) and when the tab becomes visible; a repeated join from a socket already on the board is now a resync on the server (keeps presence, no roster rebroadcast)
+  - Verified: 6 client unit tests, 2 server tests, and a real-client integration test that commits a change without broadcasting it and watches the client catch up
 
 ### Phase 3: Product depth
 - [ ] **Column reorder** - new `column:move` event: schema in events.ts, service method, gateway line, reducer case, UI drag
