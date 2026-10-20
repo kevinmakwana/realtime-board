@@ -53,6 +53,17 @@ export function ShareDialog({ boardId, role, selfUserId, onClose }: Props) {
     });
   }
 
+  async function remove() {
+    if (!window.confirm('Delete this board for everyone? Its cards and comments go with it. This cannot be undone.'))
+      return;
+    try {
+      await api.deleteBoard(boardId);
+      navigate('/');
+    } catch (e) {
+      setError(messageOf(e));
+    }
+  }
+
   async function leave() {
     try {
       await api.removeMember(boardId, selfUserId);
@@ -168,6 +179,16 @@ export function ShareDialog({ boardId, role, selfUserId, onClose }: Props) {
               Leave board
             </button>
           </footer>
+        )}
+
+        {isOwner && (
+          <section className="danger-zone">
+            <h3>Delete this board</h3>
+            <p className="note">Deletes the board, its cards and comments for everyone. This cannot be undone.</p>
+            <button type="button" className="btn danger" onClick={() => void remove()}>
+              Delete board
+            </button>
+          </section>
         )}
       </div>
     </div>

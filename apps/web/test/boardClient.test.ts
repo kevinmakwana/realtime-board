@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { selectCards, type BoardEvent, type BoardSnapshot, type Card } from '@board/shared';
+import {
+  selectCards,
+  selectColumns,
+  selectComments,
+  type BoardEvent,
+  type BoardSnapshot,
+  type Card,
+  type Comment,
+} from '@board/shared';
 import { BoardClient, type BoardSocket } from '../src/lib/boardClient';
 
 const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -19,14 +27,14 @@ const card = (n: number, columnId: string, position: string, version = 1): Card 
   updatedAt: 'x',
 });
 
-const snapshot = (seq = 3): BoardSnapshot => ({
+const snapshot = (seq = 3, comments: Comment[] = []): BoardSnapshot => ({
   board: { id: BOARD, name: 'Roadmap', createdAt: 'x' },
   columns: [
     { id: COL_A, boardId: BOARD, name: 'To do', position: 'a0' },
     { id: COL_B, boardId: BOARD, name: 'Done', position: 'a1' },
   ],
   cards: [card(1, COL_A, 'a0'), card(2, COL_A, 'a1')],
-  comments: [],
+  comments,
   seq,
 });
 
@@ -77,11 +85,18 @@ class FakeSocket {
   }
 }
 
-async function setup(seq = 3, role: 'owner' | 'editor' | 'viewer' = 'editor') {
+async function setup(seq = 3, role: 'owner' | 'editor' | 'viewer' = 'editor', comments: Comment[] = []) {
   const socket = new FakeSocket();
   const client = new BoardClient(socket as unknown as BoardSocket, BOARD, ME);
   const join = socket.last('board:join');
-  join.ack!(null, { ok: true, mode: 'snapshot', snapshot: snapshot(seq), instance: 'server-1', presence: [], role });
+  join.ack!(null, {
+    ok: true,
+    mode: 'snapshot',
+    snapshot: snapshot(seq, comments),
+    instance: 'server-1',
+    presence: [],
+    role,
+  });
   await vi.advanceTimersByTimeAsync(0);
   return { socket, client };
 }
@@ -382,5 +397,265 @@ describe('healing lost broadcasts', () => {
     socket.last('board:join').ack!(null, { ok: false, code: 'NOT_FOUND', message: 'Board not found' });
     await vi.advanceTimersByTimeAsync(0);
     expect(client.getSnapshot().status).toBe('removed');
+  });
+});
+
+describe('column reorder', () => {
+  const colOrder = (client: BoardClient) => selectColumns(client.getSnapshot().state!).map((c) => c.id);
+
+  it('shows the new order at once and sends the new key', async () => {
+    const { socket, client } = await setup(); // To do (a0), Done (a1)
+    client.moveColumn(COL_A, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(colOrder(client)).toEqual([COL_B, COL_A]);
+    const sent = socket.last('column:move').payload;
+    expect(sent).toMatchObject({ id: COL_A, boardId: BOARD });
+    expect(sent.position > 'a1').toBe(true);
+  });
+
+  it('keeps the order through ack and the confirming event', async () => {
+    const { socket, client } = await setup(3);
+    client.moveColumn(COL_A, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    const { position } = socket.last('column:move').payload;
+    socket.last('column:move').ack!(null, { ok: true, seq: 4 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(colOrder(client)).toEqual([COL_B, COL_A]);
+    socket.fire('board:event', {
+      seq: 4,
+      type: 'column.updated',
+      boardId: BOARD,
+      actorId: ME.id,
+      ts: 'x',
+      column: { id: COL_A, boardId: BOARD, name: 'To do', position },
+    });
+    expect(colOrder(client)).toEqual([COL_B, COL_A]);
+    expect(client.getSnapshot().state?.seq).toBe(4);
+  });
+
+  it('puts the column back and says why when the server refuses', async () => {
+    const { socket, client } = await setup();
+    const notices: string[] = [];
+    client.onNotice((n) => notices.push(n.message));
+    client.moveColumn(COL_A, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    socket.last('column:move').ack!(null, { ok: false, code: 'VALIDATION', message: 'Invalid position key' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(colOrder(client)).toEqual([COL_A, COL_B]);
+    expect(notices).toContain('Invalid position key');
+  });
+
+  it('does nothing for a viewer, or when the column would not move', async () => {
+    const viewer = await setup(3, 'viewer');
+    viewer.client.moveColumn(COL_A, 1);
+    expect(viewer.socket.count('column:move')).toBe(0);
+
+    const { socket, client } = await setup();
+    client.moveColumn(COL_A, 0); // already first
+    expect(socket.count('column:move')).toBe(0);
+  });
+});
+
+describe('board rename', () => {
+  it('shows the new name at once, sends it trimmed, and keeps it through ack and event', async () => {
+    const { socket, client } = await setup(3, 'owner');
+    client.renameBoard('  Q4 launch  ');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().state?.board.name).toBe('Q4 launch');
+    expect(socket.last('board:rename').payload).toEqual({ boardId: BOARD, name: 'Q4 launch' });
+
+    socket.last('board:rename').ack!(null, { ok: true, seq: 4 });
+    await vi.advanceTimersByTimeAsync(0);
+    socket.fire('board:event', {
+      seq: 4,
+      type: 'board.renamed',
+      boardId: BOARD,
+      actorId: ME.id,
+      ts: 'x',
+      name: 'Q4 launch',
+    });
+    expect(client.getSnapshot().state?.board.name).toBe('Q4 launch');
+    expect(client.getSnapshot().state?.seq).toBe(4);
+  });
+
+  it('follows a rename made by someone else', async () => {
+    const { socket, client } = await setup(3, 'editor');
+    socket.fire('board:event', {
+      seq: 4,
+      type: 'board.renamed',
+      boardId: BOARD,
+      actorId: uid(9),
+      ts: 'x',
+      name: 'Renamed elsewhere',
+    });
+    expect(client.getSnapshot().state?.board.name).toBe('Renamed elsewhere');
+  });
+
+  it('ignores a blank or unchanged name', async () => {
+    const { socket, client } = await setup(3, 'owner');
+    client.renameBoard('   ');
+    client.renameBoard('Roadmap'); // the snapshot's current name
+    expect(socket.count('board:rename')).toBe(0);
+  });
+
+  it('is for the owner: anyone else is told so and nothing is sent', async () => {
+    for (const role of ['editor', 'viewer'] as const) {
+      const { socket, client } = await setup(3, role);
+      const notices: string[] = [];
+      client.onNotice((n) => notices.push(n.message));
+      client.renameBoard('Mine now');
+      expect(socket.count('board:rename')).toBe(0);
+      expect(client.getSnapshot().state?.board.name).toBe('Roadmap');
+      expect(notices).toHaveLength(1);
+    }
+  });
+
+  it('puts the old name back when the server refuses', async () => {
+    const { socket, client } = await setup(3, 'owner');
+    client.renameBoard('Nope');
+    await vi.advanceTimersByTimeAsync(0);
+    socket.last('board:rename').ack!(null, {
+      ok: false,
+      code: 'FORBIDDEN',
+      message: 'Only the board owner can do that',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().state?.board.name).toBe('Roadmap');
+  });
+});
+
+describe('comment edit and delete', () => {
+  const comment = (n: number, authorId: string, body = `Comment ${n}`): Comment => ({
+    id: uid(300 + n),
+    boardId: BOARD,
+    cardId: uid(101),
+    authorId,
+    authorName: authorId === ME.id ? 'Ada' : 'Someone',
+    body,
+    createdAt: `2026-01-01T00:00:0${n}.000Z`,
+    editedAt: null,
+  });
+  const mine = comment(1, ME.id);
+  const theirs = comment(2, uid(9));
+  const bodies = (client: BoardClient) => selectComments(client.getSnapshot().state!, uid(101)).map((c) => c.body);
+
+  it('edits my own comment at once and sends it trimmed', async () => {
+    const { socket, client } = await setup(3, 'editor', [mine, theirs]);
+    client.editComment(mine.id, '  better  ');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodies(client)).toEqual(['better', 'Comment 2']);
+    expect(socket.last('comment:edit').payload).toEqual({ id: mine.id, boardId: BOARD, body: 'better' });
+  });
+
+  it('ignores a blank or unchanged edit', async () => {
+    const { socket, client } = await setup(3, 'editor', [mine]);
+    client.editComment(mine.id, '   ');
+    client.editComment(mine.id, mine.body);
+    expect(socket.count('comment:edit')).toBe(0);
+  });
+
+  it('will not edit someone else’s comment, even as the owner', async () => {
+    const { socket, client } = await setup(3, 'owner', [mine, theirs]);
+    const notices: string[] = [];
+    client.onNotice((n) => notices.push(n.message));
+    client.editComment(theirs.id, 'rewritten');
+    expect(socket.count('comment:edit')).toBe(0);
+    expect(bodies(client)).toEqual(['Comment 1', 'Comment 2']);
+    expect(notices).toHaveLength(1);
+  });
+
+  it('restores the text and says why when the server refuses an edit', async () => {
+    const { socket, client } = await setup(3, 'editor', [mine]);
+    const notices: string[] = [];
+    client.onNotice((n) => notices.push(n.message));
+    client.editComment(mine.id, 'changed');
+    await vi.advanceTimersByTimeAsync(0);
+    socket.last('comment:edit').ack!(null, {
+      ok: false,
+      code: 'FORBIDDEN',
+      message: 'You can only edit your own comments',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodies(client)).toEqual(['Comment 1']);
+    expect(notices).toContain('You can only edit your own comments');
+  });
+
+  it('deletes my own comment at once, and an owner can delete anyone’s', async () => {
+    const editor = await setup(3, 'editor', [mine, theirs]);
+    editor.client.deleteComment(mine.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodies(editor.client)).toEqual(['Comment 2']);
+    expect(editor.socket.last('comment:delete').payload).toEqual({ id: mine.id, boardId: BOARD });
+
+    const owner = await setup(3, 'owner', [mine, theirs]);
+    owner.client.deleteComment(theirs.id);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodies(owner.client)).toEqual(['Comment 1']);
+  });
+
+  it('will not delete someone else’s comment unless owner, and puts a refused delete back', async () => {
+    const editor = await setup(3, 'editor', [mine, theirs]);
+    editor.client.deleteComment(theirs.id);
+    expect(editor.socket.count('comment:delete')).toBe(0);
+    expect(bodies(editor.client)).toEqual(['Comment 1', 'Comment 2']);
+
+    editor.client.deleteComment(mine.id);
+    await vi.advanceTimersByTimeAsync(0);
+    editor.socket.last('comment:delete').ack!(null, { ok: false, code: 'VALIDATION', message: 'no' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bodies(editor.client)).toEqual(['Comment 1', 'Comment 2']);
+  });
+
+  it('follows edits and deletes made by others', async () => {
+    const { socket, client } = await setup(3, 'editor', [mine, theirs]);
+    socket.fire('board:event', {
+      seq: 4,
+      type: 'comment.updated',
+      boardId: BOARD,
+      actorId: uid(9),
+      ts: 'x',
+      comment: { ...theirs, body: 'edited by them', editedAt: '2026-01-02T00:00:00.000Z' },
+    });
+    expect(bodies(client)).toEqual(['Comment 1', 'edited by them']);
+    socket.fire('board:event', {
+      seq: 5,
+      type: 'comment.deleted',
+      boardId: BOARD,
+      actorId: uid(9),
+      ts: 'x',
+      commentId: theirs.id,
+    });
+    expect(bodies(client)).toEqual(['Comment 1']);
+  });
+
+  it('does nothing for a viewer', async () => {
+    const { socket, client } = await setup(3, 'viewer', [mine]);
+    client.editComment(mine.id, 'nope');
+    client.deleteComment(mine.id);
+    expect(socket.count('comment:edit') + socket.count('comment:delete')).toBe(0);
+    expect(bodies(client)).toEqual(['Comment 1']);
+  });
+});
+
+describe('a join answered after access was revoked', () => {
+  it('does not bring a removed board back to life', async () => {
+    const { socket, client } = await setup(3, 'editor');
+    await vi.advanceTimersByTimeAsync(40_000); // a periodic check goes out
+    expect(socket.count('board:join')).toBe(2);
+    socket.fire('board:access', { boardId: BOARD, role: null }); // revoked while it is in flight
+    expect(client.getSnapshot().status).toBe('removed');
+
+    socket.last('board:join').ack!(null, {
+      ok: true,
+      mode: 'replay',
+      events: [],
+      seq: 3,
+      instance: 'server-1',
+      presence: [],
+      role: 'editor',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().status).toBe('removed');
+    expect(client.getSnapshot().role).toBeNull();
   });
 });

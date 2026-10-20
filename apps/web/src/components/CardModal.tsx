@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { selectComments, type BoardState, type Card } from '@board/shared';
 import type { BoardClient } from '../lib/boardClient';
+import { CommentItem } from './CommentItem';
 
 interface Props {
   card: Card;
@@ -8,10 +9,12 @@ interface Props {
   client: BoardClient;
   editors: { name: string; color: string }[];
   readOnly: boolean;
+  selfUserId: string;
+  isOwner: boolean;
   onClose: () => void;
 }
 
-export function CardModal({ card, state, client, editors, readOnly, onClose }: Props) {
+export function CardModal({ card, state, client, editors, readOnly, selfUserId, isOwner, onClose }: Props) {
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description);
   const [comment, setComment] = useState('');
@@ -110,13 +113,13 @@ export function CardModal({ card, state, client, editors, readOnly, onClose }: P
         <h3>Comments</h3>
         <ul className="comments">
           {comments.map((c) => (
-            <li key={c.id}>
-              <strong>{c.authorName}</strong>
-              <time dateTime={c.createdAt}>
-                {new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </time>
-              <p>{c.body}</p>
-            </li>
+            <CommentItem
+              key={c.id}
+              comment={c}
+              client={client}
+              canEdit={!readOnly && c.authorId === selfUserId}
+              canDelete={!readOnly && (c.authorId === selfUserId || isOwner)}
+            />
           ))}
           {comments.length === 0 && <li className="note">No comments yet.</li>}
         </ul>

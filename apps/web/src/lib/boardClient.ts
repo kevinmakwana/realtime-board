@@ -217,6 +217,8 @@ export class BoardClient {
       }
       return;
     }
+    // Access can be revoked while a join is in flight; an answer that arrives afterwards must not undo it.
+    if (this.model.status === 'removed') return;
     if (ack.mode === 'snapshot') {
       this.auth = stateFromSnapshot(ack.snapshot);
       this.buffer.reset(ack.snapshot.seq);
@@ -436,6 +438,32 @@ export class BoardClient {
     );
   }
 
+  /** Owner only (the server enforces it; this just avoids sending a command that must fail). */
+  renameBoard(name: string): void {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === this.view().board.name) return;
+    if (this.model.role !== 'owner') {
+      this.notice('error', 'Only the board owner can rename it.');
+      return;
+    }
+    this.submit({ kind: 'board.rename', name: trimmed }, 'board', () =>
+      this.emitAck('board:rename', { boardId: this.boardId, name: trimmed }),
+    );
+  }
+
+  /** Move to `index` among the other columns (the count does not include the moved one). */
+  moveColumn(id: string, index: number): void {
+    const columns = selectColumns(this.view());
+    const from = columns.findIndex((c) => c.id === id);
+    if (from === -1) return;
+    const others = columns.filter((c) => c.id !== id);
+    if (from === Math.max(0, Math.min(index, others.length))) return; // dropped where it already is
+    const position = keyForIndex(others, index);
+    this.submit({ kind: 'column.move', id, position }, 'board', () =>
+      this.emitAck('column:move', { id, boardId: this.boardId, position }),
+    );
+  }
+
   renameColumn(id: string, name: string): void {
     if (!name.trim()) return;
     this.submit({ kind: 'column.rename', id, name: name.trim() }, 'board', () =>
@@ -459,9 +487,37 @@ export class BoardClient {
       authorName: this.user.name,
       body: body.trim(),
       createdAt: new Date().toISOString(),
+      editedAt: null,
     };
     this.submit({ kind: 'comment.add', comment }, 'board', () =>
       this.emitAck('comment:add', { id: comment.id, boardId: this.boardId, cardId, body: comment.body }),
+    );
+  }
+
+  /** Author only; the server enforces it, this avoids sending a command that must fail. */
+  editComment(id: string, body: string): void {
+    const trimmed = body.trim();
+    const comment = this.view().comments[id];
+    if (!comment || !trimmed || trimmed === comment.body) return;
+    if (comment.authorId !== this.user.id) {
+      this.notice('error', 'You can only edit your own comments.');
+      return;
+    }
+    this.submit({ kind: 'comment.edit', id, body: trimmed }, 'board', () =>
+      this.emitAck('comment:edit', { id, boardId: this.boardId, body: trimmed }),
+    );
+  }
+
+  /** The author, or the board owner moderating. */
+  deleteComment(id: string): void {
+    const comment = this.view().comments[id];
+    if (!comment) return;
+    if (comment.authorId !== this.user.id && this.model.role !== 'owner') {
+      this.notice('error', 'You can only delete your own comments.');
+      return;
+    }
+    this.submit({ kind: 'comment.delete', id }, 'board', () =>
+      this.emitAck('comment:delete', { id, boardId: this.boardId }),
     );
   }
 

@@ -34,6 +34,9 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
   if (e.seq <= state.seq) return state;
   const next: BoardState = { ...state, seq: e.seq };
   switch (e.type) {
+    case 'board.renamed':
+      next.board = { ...state.board, name: e.name };
+      break;
     case 'column.created':
     case 'column.updated':
       next.columns = { ...state.columns, [e.column.id]: e.column };
@@ -62,8 +65,14 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
       break;
     }
     case 'comment.added':
+    case 'comment.updated':
       next.comments = { ...state.comments, [e.comment.id]: e.comment };
       break;
+    case 'comment.deleted': {
+      const { [e.commentId]: _removed, ...comments } = state.comments;
+      next.comments = comments;
+      break;
+    }
   }
   return next;
 }
@@ -78,26 +87,38 @@ export function applyEvents(state: BoardState, events: readonly BoardEvent[]): B
 
 /** A local change that has been sent but not yet confirmed by the event log. */
 export type PendingOp =
+  | { kind: 'board.rename'; name: string }
   | { kind: 'column.create'; column: Column }
   | { kind: 'column.rename'; id: string; name: string }
   | { kind: 'column.delete'; id: string }
+  | { kind: 'column.move'; id: string; position: string }
   | { kind: 'card.create'; card: Card }
   | { kind: 'card.update'; id: string; title?: string; description?: string }
   | { kind: 'card.move'; id: string; columnId: string; position: string }
   | { kind: 'card.delete'; id: string }
-  | { kind: 'comment.add'; comment: Comment };
+  | { kind: 'comment.add'; comment: Comment }
+  | { kind: 'comment.edit'; id: string; body: string }
+  | { kind: 'comment.delete'; id: string };
 
 /** Project pending local ops on top of the authoritative state to get the view state. */
 export function applyPending(state: BoardState, ops: readonly PendingOp[]): BoardState {
   let s = state;
   for (const op of ops) {
     switch (op.kind) {
+      case 'board.rename':
+        s = { ...s, board: { ...s.board, name: op.name } };
+        break;
       case 'column.create':
         s = { ...s, columns: { ...s.columns, [op.column.id]: op.column } };
         break;
       case 'column.rename': {
         const col = s.columns[op.id];
         if (col) s = { ...s, columns: { ...s.columns, [op.id]: { ...col, name: op.name } } };
+        break;
+      }
+      case 'column.move': {
+        const col = s.columns[op.id];
+        if (col) s = { ...s, columns: { ...s.columns, [op.id]: { ...col, position: op.position } } };
         break;
       }
       case 'column.delete': {
@@ -144,6 +165,16 @@ export function applyPending(state: BoardState, ops: readonly PendingOp[]): Boar
       case 'comment.add':
         s = { ...s, comments: { ...s.comments, [op.comment.id]: op.comment } };
         break;
+      case 'comment.edit': {
+        const c = s.comments[op.id];
+        if (c) s = { ...s, comments: { ...s.comments, [op.id]: { ...c, body: op.body } } };
+        break;
+      }
+      case 'comment.delete': {
+        const { [op.id]: _gone, ...comments } = s.comments;
+        s = { ...s, comments };
+        break;
+      }
     }
   }
   return s;

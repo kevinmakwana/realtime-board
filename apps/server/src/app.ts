@@ -162,6 +162,12 @@ export function createApp({ config, pool, redis, service, membership, mailer, me
     res.json({ events: await service.eventsSince(id, after, 500) });
   });
 
+  api.delete('/boards/:id', async (req: AuthedRequest, res) => {
+    const id = z.uuid().parse(req.params.id);
+    await membership.deleteBoard(id, req.userId!);
+    res.json({ ok: true });
+  });
+
   api.get('/boards/:id/members', async (req: AuthedRequest, res) => {
     const id = z.uuid().parse(req.params.id);
     res.json(await membership.listMembers(id, req.userId!));

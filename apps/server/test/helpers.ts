@@ -146,3 +146,19 @@ export function waitFor<E extends keyof ServerToClientEvents>(
     (socket as any).on(event, handler);
   });
 }
+
+/**
+ * Resolves once at least `count` Postgres sessions are waiting on a lock. Tests that stall a command with a
+ * table lock use this instead of sleeping, so they do not depend on how fast the machine is.
+ */
+export async function waitUntilBlocked(pool: Pool, count = 1, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const { rows } = await pool.query(
+      "SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'",
+    );
+    if ((rows[0]?.n as number) >= count) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`fewer than ${count} sessions were waiting on a lock after ${timeoutMs}ms`);
+}

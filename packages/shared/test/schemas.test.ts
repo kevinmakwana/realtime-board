@@ -7,7 +7,7 @@ import {
   clientEventSchemas,
   setRoleBody,
 } from '../src/index.js';
-import { card, ev, ids } from './fixtures.js';
+import { card, comment, ev, ids } from './fixtures.js';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 
@@ -104,5 +104,70 @@ describe('membership schemas', () => {
 
   it('has a FORBIDDEN error code', () => {
     expect(ERROR_CODES).toContain('FORBIDDEN');
+  });
+});
+
+describe('column:move', () => {
+  it('accepts an id, a board and a position key', () => {
+    expect(clientEventSchemas['column:move'].safeParse({ id: uuid, boardId: ids.board, position: 'a1' }).success).toBe(
+      true,
+    );
+  });
+
+  it('rejects a missing or empty position and a non-uuid id', () => {
+    expect(clientEventSchemas['column:move'].safeParse({ id: uuid, boardId: ids.board }).success).toBe(false);
+    expect(clientEventSchemas['column:move'].safeParse({ id: uuid, boardId: ids.board, position: '' }).success).toBe(
+      false,
+    );
+    expect(clientEventSchemas['column:move'].safeParse({ id: 'x', boardId: ids.board, position: 'a1' }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe('board:rename', () => {
+  const parse = (name: unknown) => clientEventSchemas['board:rename'].safeParse({ boardId: ids.board, name });
+
+  it('accepts a name and trims it', () => {
+    const r = parse('  Launch plan  ');
+    expect(r.success && r.data.name).toBe('Launch plan');
+  });
+
+  it('rejects an empty, blank or over-long name', () => {
+    expect(parse('').success).toBe(false);
+    expect(parse('   ').success).toBe(false);
+    expect(parse('x'.repeat(81)).success).toBe(false);
+    expect(parse('x'.repeat(80)).success).toBe(true);
+  });
+
+  it('knows the board.renamed event', () => {
+    const e = ev(3, 'board.renamed', { name: 'New name' });
+    expect(boardEventSchema.safeParse(e).success).toBe(true);
+    expect(boardEventSchema.safeParse({ ...e, name: undefined }).success).toBe(false);
+  });
+});
+
+describe('comment:edit and comment:delete', () => {
+  it('edit needs a non-blank body within the limit, trimmed', () => {
+    const edit = clientEventSchemas['comment:edit'];
+    const r = edit.safeParse({ id: uuid, boardId: ids.board, body: '  fixed  ' });
+    expect(r.success && r.data.body).toBe('fixed');
+    expect(edit.safeParse({ id: uuid, boardId: ids.board, body: '   ' }).success).toBe(false);
+    expect(edit.safeParse({ id: uuid, boardId: ids.board, body: 'x'.repeat(2001) }).success).toBe(false);
+    expect(edit.safeParse({ id: uuid, boardId: ids.board, body: 'x'.repeat(2000) }).success).toBe(true);
+  });
+
+  it('delete needs only ids', () => {
+    expect(clientEventSchemas['comment:delete'].safeParse({ id: uuid, boardId: ids.board }).success).toBe(true);
+    expect(clientEventSchemas['comment:delete'].safeParse({ id: 'nope', boardId: ids.board }).success).toBe(false);
+  });
+
+  it('knows the comment.updated and comment.deleted events', () => {
+    const updated = ev(4, 'comment.updated', { comment: comment(uuid, ids.card1, { editedAt: 'x' }) });
+    expect(boardEventSchema.safeParse(updated).success).toBe(true);
+    expect(boardEventSchema.safeParse(ev(5, 'comment.deleted', { commentId: uuid })).success).toBe(true);
+    expect(
+      boardEventSchema.safeParse({ ...ev(5, 'comment.deleted', { commentId: uuid }), commentId: 'x' }).success,
+    ).toBe(false);
   });
 });

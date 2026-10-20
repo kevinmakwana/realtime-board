@@ -12,6 +12,9 @@ interface Props {
   editorsByCard: Map<string, { name: string; color: string }[]>;
   onOpenCard: (id: string) => void;
   readOnly: boolean;
+  /** Where a column being dragged would land relative to this one, for the drop marker. */
+  dropMarker: 'before' | 'after' | null;
+  setDraggingColumnId: (id: string | null) => void;
 }
 
 export function Column({
@@ -23,6 +26,8 @@ export function Column({
   editorsByCard,
   onOpenCard,
   readOnly,
+  dropMarker,
+  setDraggingColumnId,
 }: Props) {
   const listRef = useRef<HTMLUListElement>(null);
   const [dropIndex, setDropIndex] = useState<number | null>(null);
@@ -62,8 +67,24 @@ export function Column({
   }
 
   return (
-    <section className="lane" aria-label={column.name} data-testid={`column-${column.name}`}>
-      <header className="lane-head">
+    <section
+      className={`lane${dropMarker ? ` col-drop-${dropMarker}` : ''}`}
+      aria-label={column.name}
+      data-testid={`column-${column.name}`}
+      data-column-id={column.id}
+    >
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse drag-and-drop of columns; keyboard and touch reordering is tracked in TASKS.md (Phase 4) */}
+      <header
+        className="lane-head"
+        draggable={!readOnly && !renaming}
+        onDragStart={(e) => {
+          // Not text/plain: the card lists read that as a card id when something is dropped on them.
+          e.dataTransfer.setData('application/x-board-column', column.id);
+          e.dataTransfer.effectAllowed = 'move';
+          requestAnimationFrame(() => setDraggingColumnId(column.id));
+        }}
+        onDragEnd={() => setDraggingColumnId(null)}
+      >
         {renaming ? (
           <form
             onSubmit={(e) => {

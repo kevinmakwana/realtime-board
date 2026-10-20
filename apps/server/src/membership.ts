@@ -150,6 +150,21 @@ export class MembershipService {
     this.onAccessChanged({ boardId, userId, role: null });
   }
 
+  /**
+   * Owner only. Deletes the board with everything on it (members, invites, columns, cards, comments and
+   * the event log all cascade), waiting for any command already running on it. Every member's open tabs
+   * are then cut off, exactly as if they had been removed.
+   */
+  async deleteBoard(boardId: string, actorId: string): Promise<void> {
+    const memberIds = await this.inBoardLock(boardId, async (tx) => {
+      await this.requireOwner(tx, boardId, actorId);
+      const { rows } = await tx.query('SELECT user_id FROM board_members WHERE board_id = $1', [boardId]);
+      await tx.query('DELETE FROM boards WHERE id = $1', [boardId]);
+      return rows.map((r) => r.user_id as string);
+    });
+    for (const userId of memberIds) this.onAccessChanged({ boardId, userId, role: null });
+  }
+
   async removeInvite(boardId: string, actorId: string, email: string): Promise<void> {
     await this.requireOwner(this.pool, boardId, actorId);
     await this.pool.query('DELETE FROM board_invites WHERE board_id = $1 AND email = $2', [

@@ -634,3 +634,65 @@ textarea {
   flex: 1;
   min-width: 0;
 }
+
+/* ---------- column drag ---------- */
+.lane-head[draggable="true"] {
+  cursor: grab;
+}
+.lane.col-drop-before {
+  box-shadow: -4px 0 0 var(--accent);
+}
+.lane.col-drop-after {
+  box-shadow: 4px 0 0 var(--accent);
+}
+
+/* ---------- board title and danger zone ---------- */
+.title-btn {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: 6px;
+  cursor: text;
+}
+.title-btn:hover {
+  background: rgb(21 32 46 / 0.08);
+}
+.board-title-input {
+  font: inherit;
+  padding: 2px 8px;
+  min-width: 16ch;
+}
+.danger-zone {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.danger-zone .note {
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+/* ---------- comment edit / delete ---------- */
+.comments .edited {
+  margin-left: 6px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.comment-actions {
+  display: inline-flex;
+  gap: 10px;
+  font-size: 12px;
+}
+.comment-edit {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+.comment-edit textarea {
+  width: 100%;
+}

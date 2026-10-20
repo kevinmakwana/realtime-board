@@ -50,6 +50,7 @@ const toComment = (r: Row): Comment => ({
   authorName: r.author_name as string,
   body: r.body as string,
   createdAt: iso(r.created_at),
+  editedAt: r.edited_at ? iso(r.edited_at) : null,
 });
 
 const DEFAULT_COLUMNS = ['To do', 'In progress', 'Done'];
@@ -100,7 +101,11 @@ export class BoardService {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const b = await client.query('SELECT id, name, created_at, last_seq FROM boards WHERE id = $1', [boardId]);
       const boardRow = b.rows[0];
-      if (!boardRow) return null;
+      if (!boardRow) {
+        // End the transaction before the connection goes back to the pool, or it is handed out read-only.
+        await client.query('ROLLBACK');
+        return null;
+      }
       // Sequential on purpose: a pg client runs one query at a time.
       const cols = await client.query('SELECT * FROM columns WHERE board_id = $1 ORDER BY position, id', [boardId]);
       const cards = await client.query('SELECT * FROM cards WHERE board_id = $1 ORDER BY position, id', [boardId]);
@@ -183,7 +188,8 @@ export class BoardService {
   private async commit(
     boardId: string,
     actorId: string,
-    fn: (tx: Tx) => Promise<{ body: EventBody; version?: number } | null>,
+    fn: (tx: Tx, ctx: { role: Role }) => Promise<{ body: EventBody; version?: number } | null>,
+    opts: { ownerOnly?: boolean } = {},
   ): Promise<CommitResult> {
     const client = await this.pool.connect();
     try {
@@ -195,8 +201,9 @@ export class BoardService {
       const role = await roleOf(client, boardId, actorId);
       if (!role) throw new ServiceError('NOT_FOUND', 'Board not found');
       if (!canWrite(role)) throw new ServiceError('FORBIDDEN', 'You have view-only access to this board');
+      if (opts.ownerOnly && role !== 'owner') throw new ServiceError('FORBIDDEN', 'Only the board owner can do that');
 
-      const out = await fn(client);
+      const out = await fn(client, { role });
       if (!out) {
         await client.query('COMMIT');
         return { event: null, seq: current };
@@ -218,6 +225,21 @@ export class BoardService {
     } finally {
       client.release();
     }
+  }
+
+  /** Owner only. Renaming to the current name writes nothing. */
+  async renameBoard(actorId: string, p: ClientEventPayload<'board:rename'>): Promise<CommitResult> {
+    return this.commit(
+      p.boardId,
+      actorId,
+      async (tx) => {
+        const { rows } = await tx.query('SELECT name FROM boards WHERE id = $1', [p.boardId]);
+        if (rows[0]?.name === p.name) return null;
+        await tx.query('UPDATE boards SET name = $2 WHERE id = $1', [p.boardId, p.name]);
+        return { body: { type: 'board.renamed', boardId: p.boardId, actorId, name: p.name } };
+      },
+      { ownerOnly: true },
+    );
   }
 
   async createColumn(actorId: string, p: ClientEventPayload<'column:create'>): Promise<CommitResult> {
@@ -242,6 +264,30 @@ export class BoardService {
         p.name,
       ]);
       if (!rows[0]) throw new ServiceError('NOT_FOUND', 'Column not found');
+      return { body: { type: 'column.updated', boardId: p.boardId, actorId, column: toColumn(rows[0]) } };
+    });
+  }
+
+  /** Reorder. A drop into a gap someone else just took gets a fresh key next to it, never a duplicate. */
+  async moveColumn(actorId: string, p: ClientEventPayload<'column:move'>): Promise<CommitResult> {
+    if (!isValidOrderKey(p.position)) throw new ServiceError('VALIDATION', 'Invalid position key');
+    return this.commit(p.boardId, actorId, async (tx) => {
+      const current = await tx.query('SELECT position FROM columns WHERE id = $1 AND board_id = $2 FOR UPDATE', [
+        p.id,
+        p.boardId,
+      ]);
+      if (!current.rows[0]) throw new ServiceError('NOT_FOUND', 'Column not found');
+      const sibs = await tx.query('SELECT id, position FROM columns WHERE board_id = $1 AND id <> $2', [
+        p.boardId,
+        p.id,
+      ]);
+      const position = resolveCollision(p.position, sibs.rows as { id: string; position: string }[]);
+      if (position === current.rows[0].position) return null; // already there
+      const { rows } = await tx.query('UPDATE columns SET position = $3 WHERE id = $1 AND board_id = $2 RETURNING *', [
+        p.id,
+        p.boardId,
+        position,
+      ]);
       return { body: { type: 'column.updated', boardId: p.boardId, actorId, column: toColumn(rows[0]) } };
     });
   }
@@ -320,6 +366,44 @@ export class BoardService {
         [p.id, p.boardId, p.cardId, actorId, p.body],
       );
       return { body: { type: 'comment.added', boardId: p.boardId, actorId, comment: toComment(rows[0]) } };
+    });
+  }
+
+  /** Author only. Saving the same text writes nothing. */
+  async editComment(actorId: string, p: ClientEventPayload<'comment:edit'>): Promise<CommitResult> {
+    return this.commit(p.boardId, actorId, async (tx) => {
+      const found = await tx.query('SELECT author_id, body FROM comments WHERE id = $1 AND board_id = $2 FOR UPDATE', [
+        p.id,
+        p.boardId,
+      ]);
+      const current = found.rows[0];
+      if (!current) throw new ServiceError('NOT_FOUND', 'Comment not found');
+      if (current.author_id !== actorId) throw new ServiceError('FORBIDDEN', 'You can only edit your own comments');
+      if (current.body === p.body) return null;
+      const { rows } = await tx.query(
+        `WITH upd AS (
+           UPDATE comments SET body = $3, edited_at = now() WHERE id = $1 AND board_id = $2 RETURNING *
+         ) SELECT upd.*, u.name AS author_name FROM upd JOIN users u ON u.id = upd.author_id`,
+        [p.id, p.boardId, p.body],
+      );
+      return { body: { type: 'comment.updated', boardId: p.boardId, actorId, comment: toComment(rows[0]) } };
+    });
+  }
+
+  /** The author, or the board owner moderating. */
+  async deleteComment(actorId: string, p: ClientEventPayload<'comment:delete'>): Promise<CommitResult> {
+    return this.commit(p.boardId, actorId, async (tx, { role }) => {
+      const found = await tx.query('SELECT author_id FROM comments WHERE id = $1 AND board_id = $2 FOR UPDATE', [
+        p.id,
+        p.boardId,
+      ]);
+      const current = found.rows[0];
+      if (!current) throw new ServiceError('NOT_FOUND', 'Comment not found');
+      if (current.author_id !== actorId && role !== 'owner') {
+        throw new ServiceError('FORBIDDEN', 'You can only delete your own comments');
+      }
+      await tx.query('DELETE FROM comments WHERE id = $1', [p.id]);
+      return { body: { type: 'comment.deleted', boardId: p.boardId, actorId, commentId: p.id } };
     });
   }
 

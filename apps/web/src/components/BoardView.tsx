@@ -21,8 +21,12 @@ export function BoardView({ client, vm, state, session }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [renamingBoard, setRenamingBoard] = useState(false);
+  const [boardName, setBoardName] = useState('');
   const readOnly = vm.role === 'viewer';
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
+  const [columnDropIndex, setColumnDropIndex] = useState<number | null>(null);
   const [addingColumn, setAddingColumn] = useState(false);
   const [columnName, setColumnName] = useState('');
 
@@ -47,6 +51,23 @@ export function BoardView({ client, vm, state, session }: Props) {
   }, []);
 
   const columns = selectColumns(state);
+
+  /** Index among the other columns where a column dropped at `clientX` would land. */
+  function columnIndexAt(clientX: number): number {
+    const lanes = [...(lanesRef.current?.querySelectorAll<HTMLElement>('[data-column-id]') ?? [])].filter(
+      (el) => el.dataset.columnId !== draggingColumnId,
+    );
+    const i = lanes.findIndex((el) => {
+      const r = el.getBoundingClientRect();
+      return clientX < r.left + r.width / 2;
+    });
+    return i === -1 ? lanes.length : i;
+  }
+  const finishColumnDrag = () => {
+    setDraggingColumnId(null);
+    setColumnDropIndex(null);
+  };
+  const otherColumns = columns.filter((c) => c.id !== draggingColumnId);
   const openCard = openCardId ? state.cards[openCardId] : undefined;
   const editorsByCard = new Map<string, { name: string; color: string }[]>();
   for (const m of vm.presence) {
@@ -60,7 +81,42 @@ export function BoardView({ client, vm, state, session }: Props) {
         <button type="button" className="btn ghost back" onClick={() => navigate('/')} aria-label="Back to boards">
           Boards
         </button>
-        <h1 className="board-title">{state.board.name}</h1>
+        <h1 className="board-title" data-testid="board-title">
+          {renamingBoard ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                client.renameBoard(boardName);
+                setRenamingBoard(false);
+              }}
+            >
+              <input
+                autoFocus
+                aria-label="Board name"
+                className="board-title-input"
+                value={boardName}
+                maxLength={80}
+                onChange={(e) => setBoardName(e.target.value)}
+                onBlur={() => setRenamingBoard(false)}
+                onKeyDown={(e) => e.key === 'Escape' && setRenamingBoard(false)}
+              />
+            </form>
+          ) : vm.role === 'owner' ? (
+            <button
+              type="button"
+              className="title-btn"
+              title="Click to rename"
+              onClick={() => {
+                setBoardName(state.board.name);
+                setRenamingBoard(true);
+              }}
+            >
+              {state.board.name}
+            </button>
+          ) : (
+            state.board.name
+          )}
+        </h1>
         <span className="spacer" />
         {vm.role && (
           <button type="button" className="btn" data-testid="share" onClick={() => setSharing(true)}>
@@ -84,7 +140,24 @@ export function BoardView({ client, vm, state, session }: Props) {
       </header>
 
       <main className="canvas" onPointerMove={onPointerMove}>
-        <div className="lanes" ref={lanesRef} data-testid="lanes">
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse drag-and-drop of columns; keyboard and touch reordering is tracked in TASKS.md (Phase 4) */}
+        <div
+          className="lanes"
+          ref={lanesRef}
+          data-testid="lanes"
+          onDragOver={(e) => {
+            if (!draggingColumnId) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            setColumnDropIndex(columnIndexAt(e.clientX));
+          }}
+          onDrop={(e) => {
+            if (!draggingColumnId) return;
+            e.preventDefault();
+            client.moveColumn(draggingColumnId, columnIndexAt(e.clientX));
+            finishColumnDrag();
+          }}
+        >
           {columns.map((col) => (
             <Column
               key={col.id}
@@ -96,6 +169,16 @@ export function BoardView({ client, vm, state, session }: Props) {
               editorsByCard={editorsByCard}
               onOpenCard={setOpenCardId}
               readOnly={readOnly}
+              setDraggingColumnId={(id) => (id ? setDraggingColumnId(id) : finishColumnDrag())}
+              dropMarker={
+                draggingColumnId === null || columnDropIndex === null
+                  ? null
+                  : otherColumns[columnDropIndex]?.id === col.id
+                    ? 'before'
+                    : columnDropIndex >= otherColumns.length && otherColumns.at(-1)?.id === col.id
+                      ? 'after'
+                      : null
+              }
             />
           ))}
 
@@ -148,6 +231,8 @@ export function BoardView({ client, vm, state, session }: Props) {
           client={client}
           editors={editorsByCard.get(openCard.id) ?? []}
           readOnly={readOnly}
+          selfUserId={session.user.id}
+          isOwner={vm.role === 'owner'}
           onClose={() => setOpenCardId(null)}
         />
       )}

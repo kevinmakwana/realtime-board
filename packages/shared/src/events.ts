@@ -18,6 +18,7 @@ import {
 const eventBase = { seq: z.number().int().positive(), boardId: idSchema, actorId: idSchema, ts: z.string() };
 
 export const boardEventSchema = z.discriminatedUnion('type', [
+  z.object({ ...eventBase, type: z.literal('board.renamed'), name: z.string() }),
   z.object({ ...eventBase, type: z.literal('column.created'), column: columnSchema }),
   z.object({ ...eventBase, type: z.literal('column.updated'), column: columnSchema }),
   z.object({ ...eventBase, type: z.literal('column.deleted'), columnId: idSchema }),
@@ -26,6 +27,8 @@ export const boardEventSchema = z.discriminatedUnion('type', [
   z.object({ ...eventBase, type: z.literal('card.moved'), card: cardSchema }),
   z.object({ ...eventBase, type: z.literal('card.deleted'), cardId: idSchema }),
   z.object({ ...eventBase, type: z.literal('comment.added'), comment: commentSchema }),
+  z.object({ ...eventBase, type: z.literal('comment.updated'), comment: commentSchema }),
+  z.object({ ...eventBase, type: z.literal('comment.deleted'), commentId: idSchema }),
 ]);
 export type BoardEvent = z.infer<typeof boardEventSchema>;
 export type BoardEventType = BoardEvent['type'];
@@ -43,6 +46,12 @@ export const joinPayload = z.object({
   lastSeq: z.number().int().nonnegative().optional(),
 });
 
+/** Owner only. */
+export const boardRenamePayload = z.object({
+  boardId: idSchema,
+  name: z.string().trim().min(1).max(LIMITS.boardName),
+});
+
 export const columnCreatePayload = z.object({
   id: idSchema,
   boardId: idSchema,
@@ -55,6 +64,8 @@ export const columnRenamePayload = z.object({
   name: z.string().trim().min(1).max(LIMITS.columnName),
 });
 export const columnDeletePayload = z.object({ id: idSchema, boardId: idSchema });
+/** Reorder: the new fractional key. The server answers with a `column.updated` event. */
+export const columnMovePayload = z.object({ id: idSchema, boardId: idSchema, position: orderKeySchema });
 
 export const cardCreatePayload = z.object({
   id: idSchema,
@@ -93,6 +104,15 @@ export const commentAddPayload = z.object({
   body: z.string().trim().min(1).max(LIMITS.commentBody),
 });
 
+/** Author only; the server answers with a `comment.updated` event. */
+export const commentEditPayload = z.object({
+  id: idSchema,
+  boardId: idSchema,
+  body: z.string().trim().min(1).max(LIMITS.commentBody),
+});
+/** The author, or the board owner moderating. */
+export const commentDeletePayload = z.object({ id: idSchema, boardId: idSchema });
+
 export const cursorPayload = z.object({
   boardId: idSchema,
   /** Normalised 0..1 coordinates inside the board canvas. */
@@ -108,14 +128,18 @@ export const editingPayload = z.object({
 export const clientEventSchemas = {
   'board:join': joinPayload,
   'board:leave': z.object({ boardId: idSchema }),
+  'board:rename': boardRenamePayload,
   'column:create': columnCreatePayload,
   'column:rename': columnRenamePayload,
   'column:delete': columnDeletePayload,
+  'column:move': columnMovePayload,
   'card:create': cardCreatePayload,
   'card:update': cardUpdatePayload,
   'card:move': cardMovePayload,
   'card:delete': cardDeletePayload,
   'comment:add': commentAddPayload,
+  'comment:edit': commentEditPayload,
+  'comment:delete': commentDeletePayload,
   'presence:cursor': cursorPayload,
   'presence:editing': editingPayload,
 } as const;
@@ -195,14 +219,18 @@ type AckFn<T = object> = (ack: Ack<T>) => void;
 export interface ClientToServerEvents {
   'board:join': (p: ClientEventPayload<'board:join'>, ack: (a: JoinAck) => void) => void;
   'board:leave': (p: ClientEventPayload<'board:leave'>, ack?: AckFn) => void;
+  'board:rename': (p: ClientEventPayload<'board:rename'>, ack: AckFn) => void;
   'column:create': (p: ClientEventPayload<'column:create'>, ack: AckFn) => void;
   'column:rename': (p: ClientEventPayload<'column:rename'>, ack: AckFn) => void;
   'column:delete': (p: ClientEventPayload<'column:delete'>, ack: AckFn) => void;
+  'column:move': (p: ClientEventPayload<'column:move'>, ack: AckFn) => void;
   'card:create': (p: ClientEventPayload<'card:create'>, ack: AckFn) => void;
   'card:update': (p: ClientEventPayload<'card:update'>, ack: AckFn) => void;
   'card:move': (p: ClientEventPayload<'card:move'>, ack: AckFn) => void;
   'card:delete': (p: ClientEventPayload<'card:delete'>, ack: AckFn) => void;
   'comment:add': (p: ClientEventPayload<'comment:add'>, ack: AckFn) => void;
+  'comment:edit': (p: ClientEventPayload<'comment:edit'>, ack: AckFn) => void;
+  'comment:delete': (p: ClientEventPayload<'comment:delete'>, ack: AckFn) => void;
   'presence:cursor': (p: ClientEventPayload<'presence:cursor'>) => void;
   'presence:editing': (p: ClientEventPayload<'presence:editing'>, ack?: AckFn) => void;
 }
