@@ -11,7 +11,8 @@ export const E2E = {
 const server = (port: number, id: string) => ({
   command: 'npx tsx apps/server/src/index.ts',
   url: `http://localhost:${port}/health`,
-  env: { PORT: String(port), INSTANCE_ID: id },
+  // Every spec signs in from the same IP; the per-IP sign-in limit (20/min) is not what these tests are about.
+  env: { PORT: String(port), INSTANCE_ID: id, AUTH_RATE_LIMIT_PER_MIN: '1000' },
   reuseExistingServer: !process.env.CI,
   timeout: 60_000,
   stdout: 'pipe' as const,
