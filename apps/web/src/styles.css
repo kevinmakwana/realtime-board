@@ -696,3 +696,96 @@ textarea {
 .comment-edit textarea {
   width: 100%;
 }
+
+/* ---- card fields: labels, due date, assignees ---- */
+.label-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+.label-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  color: hsl(var(--hue) 55% 22%);
+  background: hsl(var(--hue) 70% 85%);
+}
+.chip-x {
+  border: 0;
+  padding: 0 2px;
+  background: none;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.card-meta {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.due {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  background: color-mix(in srgb, var(--ink-soft) 14%, #fff);
+}
+.due.today {
+  color: #6b4a00;
+  background: var(--warn-bg);
+}
+.due.overdue {
+  color: #fff;
+  background: var(--danger);
+}
+.card-avatars {
+  display: flex;
+  margin: 0 0 0 auto;
+  padding: 0;
+  list-style: none;
+}
+.avatar-sm {
+  width: 20px;
+  height: 20px;
+  font-size: 11px;
+  border-width: 1px;
+}
+.card-avatars .avatar-sm + .avatar-sm {
+  margin-left: -4px;
+}
+.field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.field-row .field {
+  flex: 1;
+}
+.assignees {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.assignees legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.assignee-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}

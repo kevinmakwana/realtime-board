@@ -5,6 +5,7 @@ import {
   cardSchema,
   columnSchema,
   commentSchema,
+  dueDateSchema,
   idSchema,
   orderKeySchema,
   publicUserSchema,
@@ -81,10 +82,22 @@ export const cardUpdatePayload = z
     baseVersion: z.number().int().nonnegative(),
     title: z.string().trim().min(1).max(LIMITS.cardTitle).optional(),
     description: z.string().max(LIMITS.cardDescription).optional(),
+    /** `null` clears the date. */
+    dueDate: dueDateSchema.nullable().optional(),
+    /** The complete new list; they must be members of the board (checked by the server). */
+    assigneeIds: z.array(idSchema).max(LIMITS.assigneesPerCard).optional(),
+    /** The complete new list. */
+    labels: z.array(z.string().trim().min(1).max(LIMITS.labelLength)).max(LIMITS.labelsPerCard).optional(),
   })
-  .refine((v) => v.title !== undefined || v.description !== undefined, {
-    message: 'nothing to update',
-  });
+  .refine(
+    (v) =>
+      v.title !== undefined ||
+      v.description !== undefined ||
+      v.dueDate !== undefined ||
+      v.assigneeIds !== undefined ||
+      v.labels !== undefined,
+    { message: 'nothing to update' },
+  );
 export const cardMovePayload = z.object({
   id: idSchema,
   boardId: idSchema,

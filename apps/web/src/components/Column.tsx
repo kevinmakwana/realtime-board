@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { selectCards, selectComments, type BoardState, type Column as ColumnModel } from '@board/shared';
+import { selectCards, selectComments, type BoardState, type Column as ColumnModel, type Member } from '@board/shared';
 import type { BoardClient } from '../lib/boardClient';
 import { CardTile } from './CardTile';
 
@@ -10,6 +10,7 @@ interface Props {
   draggingId: string | null;
   setDraggingId: (id: string | null) => void;
   editorsByCard: Map<string, { name: string; color: string }[]>;
+  members: Map<string, Member>;
   onOpenCard: (id: string) => void;
   readOnly: boolean;
   /** Where a column being dragged would land relative to this one, for the drop marker. */
@@ -24,6 +25,7 @@ export function Column({
   draggingId,
   setDraggingId,
   editorsByCard,
+  members,
   onOpenCard,
   readOnly,
   dropMarker,
@@ -159,6 +161,7 @@ export function Column({
                   readOnly={readOnly}
                   commentCount={selectComments(state, card.id).length}
                   editors={editorsByCard.get(card.id) ?? []}
+                  members={members}
                   onOpen={() => onOpenCard(card.id)}
                   onDragStart={() => requestAnimationFrame(() => setDraggingId(card.id))}
                   onDragEnd={() => {

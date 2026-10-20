@@ -120,7 +120,7 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 | `column:move` | `{ id, boardId, position }` | `{ seq }` | Reorder. Answered with a `column.updated` event. A position someone else just took is nudged to a free key next to it. |
 | `column:delete` | `{ id, boardId }` | `{ seq }` | Cascades to its cards. |
 | `card:create` | `{ id, boardId, columnId, title, position }` | `{ seq, version }` | |
-| `card:update` | `{ id, boardId, baseVersion, title?, description? }` | `{ seq, version }` | `VERSION_CONFLICT` if `baseVersion` is stale. |
+| `card:update` | `{ id, boardId, baseVersion, title?, description?, dueDate?, assigneeIds?, labels? }` | `{ seq, version }` | `VERSION_CONFLICT` if `baseVersion` is stale. `dueDate` is `YYYY-MM-DD` or `null` to clear; `assigneeIds` (max 10) must all be board members; `labels` (max 5, 24 chars) are de-duplicated ignoring case. Omitted fields are left alone. |
 | `card:move` | `{ id, boardId, baseVersion, columnId, position }` | `{ seq, version }` | Same version check. `position` is a fractional key. |
 | `card:delete` | `{ id, boardId, baseVersion }` | `{ seq }` | Same version check. |
 | `comment:add` | `{ id, boardId, cardId, body }` | `{ seq }` | |

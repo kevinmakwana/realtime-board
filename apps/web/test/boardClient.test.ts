@@ -25,6 +25,9 @@ const card = (n: number, columnId: string, position: string, version = 1): Card 
   position,
   version,
   updatedAt: 'x',
+  dueDate: null,
+  assigneeIds: [],
+  labels: [],
 });
 
 const snapshot = (seq = 3, comments: Comment[] = []): BoardSnapshot => ({
@@ -172,6 +175,46 @@ describe('BoardClient', () => {
     expect(notices[0]).toMatch(/Someone else changed that card/);
     expect(socket.count('board:join')).toBe(2);
     expect(socket.last('board:join').payload).toEqual({ boardId: BOARD, lastSeq: 3 });
+  });
+
+  it('sends due date, assignees and labels, shows them at once, and rolls them back if refused', async () => {
+    const { socket, client } = await setup();
+    const notices: string[] = [];
+    client.onNotice((n) => notices.push(n.message));
+    client.updateCard(uid(101), { dueDate: '2026-03-15', assigneeIds: [ME.id], labels: ['bug'] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().state!.cards[uid(101)]).toMatchObject({
+      dueDate: '2026-03-15',
+      assigneeIds: [ME.id],
+      labels: ['bug'],
+    });
+    expect(socket.last('card:update').payload).toMatchObject({
+      id: uid(101),
+      dueDate: '2026-03-15',
+      assigneeIds: [ME.id],
+      labels: ['bug'],
+    });
+
+    socket.last('card:update').ack!(null, { ok: false, code: 'VALIDATION', message: 'Assignees must be members' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().state!.cards[uid(101)]).toMatchObject({ dueDate: null, assigneeIds: [], labels: [] });
+    expect(notices).toEqual(['Assignees must be members']);
+  });
+
+  it('clears a due date by sending null', async () => {
+    const { socket, client } = await setup();
+    client.updateCard(uid(101), { dueDate: null });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.last('card:update').payload.dueDate).toBeNull();
+  });
+
+  it('does not send fields it was not given', async () => {
+    const { socket, client } = await setup();
+    client.updateCard(uid(101), { title: 'Only title' });
+    await vi.advanceTimersByTimeAsync(0);
+    const sent = socket.last('card:update').payload;
+    expect('dueDate' in sent).toBe(false);
+    expect('labels' in sent).toBe(false);
   });
 
   it('chains commands on the same card so the second uses the version the first produced', async () => {

@@ -43,7 +43,8 @@
   - Owner only. Rename is `board:rename` + `board.renamed` (live, in the log); delete is `DELETE /api/boards/:id` under the board lock, cascades, and cuts every member off. Found and fixed a connection leak in `getSnapshot` for missing boards on the way. Verified incl. delete-waits-for-in-flight-command and an e2e
 - [x] ~~**Comment edit and delete**~~ (2026-10-20)
   - `comment:edit` (author only) and `comment:delete` (author or board owner), `comment.updated`/`comment.deleted` events, migration 3 (`edited_at`), inline editor and "(edited)" marker. Verified: server matrix, client unit, e2e with moderation
-- [ ] **Card assignees, labels, due dates** - extend `cardSchema` and the migrations
+- [x] ~~**Card assignees, labels, due dates**~~ (2026-10-20)
+  - Extra optional fields on `card:update` (same version check, same `card.updated` event), migration 4 (`due_date date`, `assignee_ids uuid[]`, `labels text[]`); assignees must be board members; old log entries are normalised on replay. Card modal editors (date, label chips, member checkboxes), tile badges (overdue/today), live for everyone. Verified: shared, server matrix, client unit, e2e incl. a read-only viewer
 - [ ] **Activity feed UI** - the data already exists in `board_events`
 - [ ] **Search** - cards and comments within a board
 

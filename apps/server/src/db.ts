@@ -3,6 +3,10 @@ import { migrations } from './migrations.js';
 
 export type Pool = pg.Pool;
 
+// A DATE column is a calendar day, not an instant: hand it over as the 'YYYY-MM-DD' text Postgres sends, instead of
+// letting the driver turn it into a local-midnight Date that shifts by the server's time zone.
+pg.types.setTypeParser(pg.types.builtins.DATE, (value) => value);
+
 export function createPool(connectionString: string, max = 10): Pool {
   const pool = new pg.Pool({ connectionString, max });
   // An idle client erroring (e.g. Postgres restart) must not crash the process.

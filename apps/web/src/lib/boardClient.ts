@@ -369,6 +369,9 @@ export class BoardClient {
       position: keyForAppend(selectCards(state, columnId)),
       version: 1,
       updatedAt: new Date().toISOString(),
+      dueDate: null,
+      assigneeIds: [],
+      labels: [],
     };
     if (!card.title) return;
     this.submit(
@@ -386,7 +389,16 @@ export class BoardClient {
     );
   }
 
-  updateCard(id: string, patch: { title?: string; description?: string }): void {
+  updateCard(
+    id: string,
+    patch: {
+      title?: string;
+      description?: string;
+      dueDate?: string | null;
+      assigneeIds?: string[];
+      labels?: string[];
+    },
+  ): void {
     if (patch.title !== undefined && !patch.title.trim()) return;
     this.submit(
       { kind: 'card.update', id, ...patch },

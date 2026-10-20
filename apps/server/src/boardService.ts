@@ -41,6 +41,9 @@ const toCard = (r: Row): Card => ({
   position: r.position as string,
   version: r.version as number,
   updatedAt: iso(r.updated_at),
+  dueDate: (r.due_date as string | null) ?? null,
+  assigneeIds: (r.assignee_ids as string[] | null) ?? [],
+  labels: (r.labels as string[] | null) ?? [],
 });
 const toComment = (r: Row): Comment => ({
   id: r.id as string,
@@ -319,11 +322,38 @@ export class BoardService {
   async updateCard(actorId: string, p: ClientEventPayload<'card:update'>): Promise<CommitResult> {
     return this.commit(p.boardId, actorId, async (tx) => {
       const current = await this.lockCard(tx, p.id, p.boardId, p.baseVersion);
+
+      // Assignees must be people on this board; repeats collapse.
+      const assigneeIds = p.assigneeIds && [...new Set(p.assigneeIds)];
+      if (assigneeIds?.length) {
+        const known = await tx.query(
+          'SELECT count(*)::int AS n FROM board_members WHERE board_id = $1 AND user_id = ANY($2::uuid[])',
+          [p.boardId, assigneeIds],
+        );
+        if (known.rows[0].n !== assigneeIds.length) {
+          throw new ServiceError('VALIDATION', 'Assignees must be members of this board');
+        }
+      }
+      // Labels that differ only in case are the same label; the first spelling wins.
+      const seen = new Set<string>();
+      const labels = p.labels?.filter((l) => !seen.has(l.toLowerCase()) && seen.add(l.toLowerCase()));
+
       const { rows } = await tx.query(
         `UPDATE cards SET title = COALESCE($2, title), description = COALESCE($3, description),
+                due_date = CASE WHEN $4::boolean THEN $5::date ELSE due_date END,
+                assignee_ids = COALESCE($6::uuid[], assignee_ids),
+                labels = COALESCE($7::text[], labels),
                 version = version + 1, updated_at = now()
          WHERE id = $1 RETURNING *`,
-        [current.id, p.title ?? null, p.description ?? null],
+        [
+          current.id,
+          p.title ?? null,
+          p.description ?? null,
+          p.dueDate !== undefined,
+          p.dueDate ?? null,
+          assigneeIds ?? null,
+          labels ?? null,
+        ],
       );
       const card = toCard(rows[0]);
       return { body: { type: 'card.updated', boardId: p.boardId, actorId, card }, version: card.version };
