@@ -323,14 +323,16 @@ export class BoardService {
     return this.commit(p.boardId, actorId, async (tx) => {
       const current = await this.lockCard(tx, p.id, p.boardId, p.baseVersion);
 
-      // Assignees must be people on this board; repeats collapse.
+      // Anyone newly assigned must be on this board; repeats collapse. People already on the card are left
+      // alone even if they have since left the board, so their id can still be sent back (or dropped).
       const assigneeIds = p.assigneeIds && [...new Set(p.assigneeIds)];
-      if (assigneeIds?.length) {
+      const added = assigneeIds?.filter((id) => !current.assigneeIds.includes(id));
+      if (added?.length) {
         const known = await tx.query(
           'SELECT count(*)::int AS n FROM board_members WHERE board_id = $1 AND user_id = ANY($2::uuid[])',
-          [p.boardId, assigneeIds],
+          [p.boardId, added],
         );
-        if (known.rows[0].n !== assigneeIds.length) {
+        if (known.rows[0].n !== added.length) {
           throw new ServiceError('VALIDATION', 'Assignees must be members of this board');
         }
       }

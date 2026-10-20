@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { selectColumns, type BoardState, type Member } from '@board/shared';
 import { api, type Session } from '../api';
 import type { BoardClient, BoardViewModel } from '../lib/boardClient';
@@ -26,7 +26,7 @@ export function BoardView({ client, vm, state, session }: Props) {
   const readOnly = vm.role === 'viewer';
   const [memberList, setMemberList] = useState<Member[]>([]);
   const boardId = state.board.id;
-  const members = new Map(memberList.map((m) => [m.userId, m]));
+  const members = useMemo(() => new Map(memberList.map((m) => [m.userId, m])), [memberList]);
   const lastTried = useRef('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);

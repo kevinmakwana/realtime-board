@@ -140,4 +140,25 @@ describe('card due dates, assignees and labels', () => {
     ).toMatchObject({ ok: false, code: 'VALIDATION' });
     expect((await stored()).version).toBe(1);
   });
+
+  it('keeps working after an assignee leaves the board: they can be dropped, and others added', async () => {
+    const { ada, grace, id, boardId, sa, stored } = await scene();
+    await emit(sa, 'card:update', { id, boardId, baseVersion: 1, assigneeIds: [grace.id] });
+    await world.pool.query('DELETE FROM board_members WHERE board_id = $1 AND user_id = $2', [boardId, grace.id]);
+
+    // Re-sending the departed person alongside a new one is accepted (they are already on the card)...
+    expect(
+      await emit(sa, 'card:update', { id, boardId, baseVersion: 2, assigneeIds: [grace.id, ada.id] }),
+    ).toMatchObject({ ok: true });
+    // ...but nobody new can be added who is not on the board, and the departed can be removed.
+    const stranger = await world.newUser('Nobody');
+    expect(await emit(sa, 'card:update', { id, boardId, baseVersion: 3, assigneeIds: [stranger.id] })).toMatchObject({
+      ok: false,
+      code: 'VALIDATION',
+    });
+    expect(await emit(sa, 'card:update', { id, boardId, baseVersion: 3, assigneeIds: [ada.id] })).toMatchObject({
+      ok: true,
+    });
+    expect((await stored()).assigneeIds).toEqual([ada.id]);
+  });
 });

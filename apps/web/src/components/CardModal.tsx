@@ -21,10 +21,17 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
   const [description, setDescription] = useState(card.description);
   const [comment, setComment] = useState('');
   const [newLabel, setNewLabel] = useState('');
+  // The date is typed in segments, so hold it locally and save only once it is a complete date.
+  const [dueDraft, setDueDraft] = useState(card.dueDate ?? '');
+  useEffect(() => setDueDraft(card.dueDate ?? ''), [card.dueDate]);
   // The version our draft is based on; if the server moves past it while we have unsaved text, say so.
   const baseline = useRef({ title: card.title, description: card.description, version: card.version });
   const dirty = title !== baseline.current.title || description !== baseline.current.description;
-  const remoteChanged = card.version > baseline.current.version && dirty;
+  // Only a change to the text we are editing counts: our own date/label/assignee saves also bump the version.
+  const remoteChanged =
+    card.version > baseline.current.version &&
+    dirty &&
+    (card.title !== baseline.current.title || card.description !== baseline.current.description);
   const comments = selectComments(state, card.id);
   const column = state.columns[card.columnId];
 
@@ -54,7 +61,9 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
   }
 
   function toggleAssignee(userId: string, on: boolean) {
-    const rest = card.assigneeIds.filter((id) => id !== userId);
+    // People who have left the board can no longer be re-sent, so they drop off the card with this change.
+    const onBoard = new Set(members.map((m) => m.userId));
+    const rest = card.assigneeIds.filter((id) => id !== userId && onBoard.has(id));
     client.updateCard(card.id, { assigneeIds: on ? [...rest, userId] : rest });
   }
 
@@ -131,9 +140,18 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
             Due date
             <input
               type="date"
-              value={card.dueDate ?? ''}
+              value={dueDraft}
               disabled={readOnly}
-              onChange={(e) => client.updateCard(card.id, { dueDate: e.target.value || null })}
+              onChange={(e) => {
+                setDueDraft(e.target.value);
+                if (/^[1-9]\d{3}-\d{2}-\d{2}$/.test(e.target.value) && e.target.value !== card.dueDate) {
+                  client.updateCard(card.id, { dueDate: e.target.value });
+                }
+              }}
+              onBlur={() => {
+                if (dueDraft === '' && card.dueDate) client.updateCard(card.id, { dueDate: null });
+                else setDueDraft(card.dueDate ?? '');
+              }}
             />
           </label>
           {!readOnly && card.dueDate && (

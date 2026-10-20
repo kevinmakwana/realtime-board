@@ -88,7 +88,8 @@ export function CardTile({
                     title={member?.name ?? 'Former member'}
                     style={{ background: member?.color ?? '#7a8699' }}
                   >
-                    {member?.name[0] ?? '?'}
+                    <span aria-hidden>{member?.name[0] ?? '?'}</span>
+                    <span className="sr-only">{member?.name ?? 'Former member'}</span>
                   </li>
                 );
               })}
