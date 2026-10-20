@@ -798,3 +798,51 @@ textarea {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* ---- search and activity ---- */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.search input {
+  width: 190px;
+  padding: 5px 10px;
+}
+.search-count {
+  font-size: 13px;
+  color: #c5cfdd;
+  white-space: nowrap;
+}
+.activity {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  width: min(360px, 100vw);
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  box-shadow: -6px 0 18px rgb(21 32 46 / 0.18);
+}
+.activity-list {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.activity-list li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.activity-list time {
+  font-size: 12px;
+  color: var(--ink-soft);
+}

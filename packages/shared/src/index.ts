@@ -3,3 +3,4 @@ export * from './events.js';
 export * from './ordering.js';
 export * from './state.js';
 export * from './seqBuffer.js';
+export * from './activity.js';

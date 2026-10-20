@@ -1,5 +1,12 @@
 import { useRef, useState } from 'react';
-import { selectCards, selectComments, type BoardState, type Column as ColumnModel, type Member } from '@board/shared';
+import {
+  selectCards,
+  selectComments,
+  type BoardState,
+  type Card,
+  type Column as ColumnModel,
+  type Member,
+} from '@board/shared';
 import type { BoardClient } from '../lib/boardClient';
 import { CardTile } from './CardTile';
 
@@ -11,6 +18,8 @@ interface Props {
   setDraggingId: (id: string | null) => void;
   editorsByCard: Map<string, { name: string; color: string }[]>;
   members: Map<string, Member>;
+  /** While searching: shows only matching cards (and stops card dragging, whose drop positions assume all are shown). */
+  filter: ((card: Card) => boolean) | null;
   onOpenCard: (id: string) => void;
   readOnly: boolean;
   /** Where a column being dragged would land relative to this one, for the drop marker. */
@@ -26,6 +35,7 @@ export function Column({
   setDraggingId,
   editorsByCard,
   members,
+  filter,
   onOpenCard,
   readOnly,
   dropMarker,
@@ -38,7 +48,8 @@ export function Column({
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(column.name);
 
-  const cards = selectCards(state, column.id);
+  const allCards = selectCards(state, column.id);
+  const cards = filter ? allCards.filter(filter) : allCards;
   const visibleCount = cards.filter((c) => c.id !== draggingId).length;
 
   /** Index among the column's cards (minus the dragged one) where a drop at `clientY` would land. */
@@ -119,7 +130,7 @@ export function Column({
           </h2>
         )}
         <span className="count" role="img" aria-label={`${cards.length} cards`}>
-          {cards.length}
+          {filter ? `${cards.length}/${allCards.length}` : cards.length}
         </span>
         {!readOnly && (
           <button
@@ -158,7 +169,7 @@ export function Column({
                 <CardTile
                   card={card}
                   dragging={isDragged}
-                  readOnly={readOnly}
+                  readOnly={readOnly || filter !== null}
                   commentCount={selectComments(state, card.id).length}
                   editors={editorsByCard.get(card.id) ?? []}
                   members={members}

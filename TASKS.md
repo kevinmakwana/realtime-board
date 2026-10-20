@@ -45,8 +45,10 @@
   - `comment:edit` (author only) and `comment:delete` (author or board owner), `comment.updated`/`comment.deleted` events, migration 3 (`edited_at`), inline editor and "(edited)" marker. Verified: server matrix, client unit, e2e with moderation
 - [x] ~~**Card assignees, labels, due dates**~~ (2026-10-20)
   - Extra optional fields on `card:update` (same version check, same `card.updated` event), migration 4 (`due_date date`, `assignee_ids uuid[]`, `labels text[]`); assignees must be board members; old log entries are normalised on replay. Card modal editors (date, label chips, member checkboxes), tile badges (overdue/today), live for everyone. Verified: shared, server matrix, client unit, e2e incl. a read-only viewer
-- [ ] **Activity feed UI** - the data already exists in `board_events`
-- [ ] **Search** - cards and comments within a board
+- [x] ~~**Activity feed UI**~~ (2026-10-20)
+  - `GET /api/boards/:id/activity` turns `board_events` into readable lines (a pure `describeActivity` in `packages/shared` remembers titles and column names, so "deleted a card" still names it; it looks back 500 events and knows the default columns, which are seeded without events). Side panel in the board header, reloads (debounced) whenever the board's seq moves. Verified: shared unit tests, server int tests (limit, viewer, non-member), e2e with two users
+- [x] ~~**Search**~~ (2026-10-20)
+  - Client-side: a header box filters cards by every word across title, description, labels, assignee names and comments; columns show `matches/total`. Dragging cards is off while a search is active (drop positions assume every card is shown). Verified: unit tests for the matcher, e2e incl. a card arriving live while searching
 
 ### Phase 4: Hardening and scale
 - [ ] **Frontend component tests and REST route tests** - React Testing Library for the board and card modal; route tests for app.ts

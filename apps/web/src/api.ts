@@ -1,4 +1,5 @@
 import type {
+  ActivityEntry,
   AddMemberResult,
   BoardSnapshot,
   BoardWithRole,
@@ -73,6 +74,8 @@ export const api = {
   verify: (token: string) => request<Session>('/api/auth/verify', { body: { token } }),
   listBoards: () => request<{ boards: BoardWithRole[] }>('/api/boards'),
   deleteBoard: (boardId: string) => request<{ ok: true }>(`/api/boards/${boardId}`, { method: 'DELETE' }),
+  activity: (boardId: string, limit = 50) =>
+    request<{ entries: ActivityEntry[] }>(`/api/boards/${boardId}/activity?limit=${limit}`),
   listMembers: (boardId: string) => request<MembersResponse>(`/api/boards/${boardId}/members`),
   addMember: (boardId: string, email: string, role: GrantableRole) =>
     request<AddMemberResult>(`/api/boards/${boardId}/members`, { body: { email, role } }),

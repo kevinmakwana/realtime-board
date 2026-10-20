@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { selectColumns, type BoardState, type Member } from '@board/shared';
+import { selectColumns, type BoardState, type Card, type Member } from '@board/shared';
 import { api, type Session } from '../api';
 import type { BoardClient, BoardViewModel } from '../lib/boardClient';
+import { cardMatches, parseQuery } from '../lib/search';
 import { navigate } from '../router';
+import { ActivityPanel } from './ActivityPanel';
 import { CardModal } from './CardModal';
 import { Column } from './Column';
 import { ShareDialog } from './ShareDialog';
@@ -21,6 +23,8 @@ export function BoardView({ client, vm, state, session }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [showActivity, setShowActivity] = useState(false);
+  const [query, setQuery] = useState('');
   const [renamingBoard, setRenamingBoard] = useState(false);
   const [boardName, setBoardName] = useState('');
   const readOnly = vm.role === 'viewer';
@@ -49,6 +53,7 @@ export function BoardView({ client, vm, state, session }: Props) {
       if (e.key !== 'Escape') return;
       setOpenCardId(null);
       setSharing(false);
+      setShowActivity(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -81,6 +86,10 @@ export function BoardView({ client, vm, state, session }: Props) {
   }, [unknownAssignees, loadMembers]);
 
   const columns = selectColumns(state);
+  const words = parseQuery(query);
+  const memberNames = useMemo(() => new Map(memberList.map((m) => [m.userId, m.name])), [memberList]);
+  const filter = words.length > 0 ? (card: Card) => cardMatches(state, card, words, memberNames) : null;
+  const matchCount = filter ? Object.values(state.cards).filter(filter).length : 0;
 
   /** Index among the other columns where a column dropped at `clientX` would land. */
   function columnIndexAt(clientX: number): number {
@@ -148,6 +157,35 @@ export function BoardView({ client, vm, state, session }: Props) {
           )}
         </h1>
         <span className="spacer" />
+        <div className="search">
+          <input
+            type="search"
+            aria-label="Search cards"
+            placeholder="Search cards…"
+            value={query}
+            maxLength={100}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setQuery('');
+              }
+            }}
+          />
+          {filter && (
+            <span className="search-count" role="status" data-testid="search-count">
+              {matchCount} match{matchCount === 1 ? '' : 'es'}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="btn"
+          data-testid="activity-toggle"
+          aria-pressed={showActivity}
+          onClick={() => setShowActivity((v) => !v)}
+        >
+          Activity
+        </button>
         {vm.role && (
           <button type="button" className="btn" data-testid="share" onClick={() => setSharing(true)}>
             Share
@@ -198,6 +236,7 @@ export function BoardView({ client, vm, state, session }: Props) {
               setDraggingId={setDraggingId}
               editorsByCard={editorsByCard}
               members={members}
+              filter={filter}
               onOpenCard={setOpenCardId}
               readOnly={readOnly}
               setDraggingColumnId={(id) => (id ? setDraggingColumnId(id) : finishColumnDrag())}
@@ -254,6 +293,7 @@ export function BoardView({ client, vm, state, session }: Props) {
         </div>
       </main>
 
+      {showActivity && <ActivityPanel boardId={boardId} seq={state.seq} onClose={() => setShowActivity(false)} />}
       {openCard && (
         <CardModal
           key={openCard.id}
