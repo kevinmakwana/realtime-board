@@ -114,3 +114,18 @@ describe('applyEvent: column.updated carries a move', () => {
     expect(selectColumns(s).map((c) => c.name)).toEqual(['Doing', 'Todo']);
   });
 });
+
+describe('board rename', () => {
+  it('applies board.renamed to the board name and seq', () => {
+    const s = applyEvent(base(), ev(5, 'board.renamed', { name: 'Q4 launch' }));
+    expect(s.board.name).toBe('Q4 launch');
+    expect(s.seq).toBe(5);
+  });
+
+  it('shows a pending rename in the view only', () => {
+    const s = base();
+    const view = applyPending(s, [{ kind: 'board.rename', name: 'Draft name' }]);
+    expect(view.board.name).toBe('Draft name');
+    expect(s.board.name).toBe('Roadmap');
+  });
+});

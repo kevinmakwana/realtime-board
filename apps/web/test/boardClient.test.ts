@@ -440,3 +440,71 @@ describe('column reorder', () => {
     expect(socket.count('column:move')).toBe(0);
   });
 });
+
+describe('board rename', () => {
+  it('shows the new name at once, sends it trimmed, and keeps it through ack and event', async () => {
+    const { socket, client } = await setup(3, 'owner');
+    client.renameBoard('  Q4 launch  ');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().state?.board.name).toBe('Q4 launch');
+    expect(socket.last('board:rename').payload).toEqual({ boardId: BOARD, name: 'Q4 launch' });
+
+    socket.last('board:rename').ack!(null, { ok: true, seq: 4 });
+    await vi.advanceTimersByTimeAsync(0);
+    socket.fire('board:event', {
+      seq: 4,
+      type: 'board.renamed',
+      boardId: BOARD,
+      actorId: ME.id,
+      ts: 'x',
+      name: 'Q4 launch',
+    });
+    expect(client.getSnapshot().state?.board.name).toBe('Q4 launch');
+    expect(client.getSnapshot().state?.seq).toBe(4);
+  });
+
+  it('follows a rename made by someone else', async () => {
+    const { socket, client } = await setup(3, 'editor');
+    socket.fire('board:event', {
+      seq: 4,
+      type: 'board.renamed',
+      boardId: BOARD,
+      actorId: uid(9),
+      ts: 'x',
+      name: 'Renamed elsewhere',
+    });
+    expect(client.getSnapshot().state?.board.name).toBe('Renamed elsewhere');
+  });
+
+  it('ignores a blank or unchanged name', async () => {
+    const { socket, client } = await setup(3, 'owner');
+    client.renameBoard('   ');
+    client.renameBoard('Roadmap'); // the snapshot's current name
+    expect(socket.count('board:rename')).toBe(0);
+  });
+
+  it('is for the owner: anyone else is told so and nothing is sent', async () => {
+    for (const role of ['editor', 'viewer'] as const) {
+      const { socket, client } = await setup(3, role);
+      const notices: string[] = [];
+      client.onNotice((n) => notices.push(n.message));
+      client.renameBoard('Mine now');
+      expect(socket.count('board:rename')).toBe(0);
+      expect(client.getSnapshot().state?.board.name).toBe('Roadmap');
+      expect(notices).toHaveLength(1);
+    }
+  });
+
+  it('puts the old name back when the server refuses', async () => {
+    const { socket, client } = await setup(3, 'owner');
+    client.renameBoard('Nope');
+    await vi.advanceTimersByTimeAsync(0);
+    socket.last('board:rename').ack!(null, {
+      ok: false,
+      code: 'FORBIDDEN',
+      message: 'Only the board owner can do that',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().state?.board.name).toBe('Roadmap');
+  });
+});

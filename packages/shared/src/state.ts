@@ -34,6 +34,9 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
   if (e.seq <= state.seq) return state;
   const next: BoardState = { ...state, seq: e.seq };
   switch (e.type) {
+    case 'board.renamed':
+      next.board = { ...state.board, name: e.name };
+      break;
     case 'column.created':
     case 'column.updated':
       next.columns = { ...state.columns, [e.column.id]: e.column };
@@ -78,6 +81,7 @@ export function applyEvents(state: BoardState, events: readonly BoardEvent[]): B
 
 /** A local change that has been sent but not yet confirmed by the event log. */
 export type PendingOp =
+  | { kind: 'board.rename'; name: string }
   | { kind: 'column.create'; column: Column }
   | { kind: 'column.rename'; id: string; name: string }
   | { kind: 'column.delete'; id: string }
@@ -93,6 +97,9 @@ export function applyPending(state: BoardState, ops: readonly PendingOp[]): Boar
   let s = state;
   for (const op of ops) {
     switch (op.kind) {
+      case 'board.rename':
+        s = { ...s, board: { ...s.board, name: op.name } };
+        break;
       case 'column.create':
         s = { ...s, columns: { ...s.columns, [op.column.id]: op.column } };
         break;

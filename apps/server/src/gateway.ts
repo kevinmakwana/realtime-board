@@ -210,6 +210,7 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
       { requireJoined: false },
     );
 
+    command('board:rename', async (p) => publish(await service.renameBoard(user.id, p)));
     command('column:create', async (p) => publish(await service.createColumn(user.id, p)));
     command('column:rename', async (p) => publish(await service.renameColumn(user.id, p)));
     command('column:move', async (p) => publish(await service.moveColumn(user.id, p)));

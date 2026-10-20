@@ -645,3 +645,34 @@ textarea {
 .lane.col-drop-after {
   box-shadow: 4px 0 0 var(--accent);
 }
+
+/* ---------- board title and danger zone ---------- */
+.title-btn {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: 6px;
+  cursor: text;
+}
+.title-btn:hover {
+  background: rgb(21 32 46 / 0.08);
+}
+.board-title-input {
+  font: inherit;
+  padding: 2px 8px;
+  min-width: 16ch;
+}
+.danger-zone {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.danger-zone .note {
+  color: var(--ink-soft);
+  font-size: 13px;
+}

@@ -21,6 +21,8 @@ export function BoardView({ client, vm, state, session }: Props) {
   const lanesRef = useRef<HTMLDivElement>(null);
   const [openCardId, setOpenCardId] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [renamingBoard, setRenamingBoard] = useState(false);
+  const [boardName, setBoardName] = useState('');
   const readOnly = vm.role === 'viewer';
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
@@ -79,7 +81,42 @@ export function BoardView({ client, vm, state, session }: Props) {
         <button type="button" className="btn ghost back" onClick={() => navigate('/')} aria-label="Back to boards">
           Boards
         </button>
-        <h1 className="board-title">{state.board.name}</h1>
+        <h1 className="board-title" data-testid="board-title">
+          {renamingBoard ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                client.renameBoard(boardName);
+                setRenamingBoard(false);
+              }}
+            >
+              <input
+                autoFocus
+                aria-label="Board name"
+                className="board-title-input"
+                value={boardName}
+                maxLength={80}
+                onChange={(e) => setBoardName(e.target.value)}
+                onBlur={() => setRenamingBoard(false)}
+                onKeyDown={(e) => e.key === 'Escape' && setRenamingBoard(false)}
+              />
+            </form>
+          ) : vm.role === 'owner' ? (
+            <button
+              type="button"
+              className="title-btn"
+              title="Click to rename"
+              onClick={() => {
+                setBoardName(state.board.name);
+                setRenamingBoard(true);
+              }}
+            >
+              {state.board.name}
+            </button>
+          ) : (
+            state.board.name
+          )}
+        </h1>
         <span className="spacer" />
         {vm.role && (
           <button type="button" className="btn" data-testid="share" onClick={() => setSharing(true)}>

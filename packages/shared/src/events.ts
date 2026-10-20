@@ -18,6 +18,7 @@ import {
 const eventBase = { seq: z.number().int().positive(), boardId: idSchema, actorId: idSchema, ts: z.string() };
 
 export const boardEventSchema = z.discriminatedUnion('type', [
+  z.object({ ...eventBase, type: z.literal('board.renamed'), name: z.string() }),
   z.object({ ...eventBase, type: z.literal('column.created'), column: columnSchema }),
   z.object({ ...eventBase, type: z.literal('column.updated'), column: columnSchema }),
   z.object({ ...eventBase, type: z.literal('column.deleted'), columnId: idSchema }),
@@ -41,6 +42,12 @@ export const joinPayload = z.object({
   boardId: idSchema,
   /** Last event seq the client has applied; omit for a first join. */
   lastSeq: z.number().int().nonnegative().optional(),
+});
+
+/** Owner only. */
+export const boardRenamePayload = z.object({
+  boardId: idSchema,
+  name: z.string().trim().min(1).max(LIMITS.boardName),
 });
 
 export const columnCreatePayload = z.object({
@@ -110,6 +117,7 @@ export const editingPayload = z.object({
 export const clientEventSchemas = {
   'board:join': joinPayload,
   'board:leave': z.object({ boardId: idSchema }),
+  'board:rename': boardRenamePayload,
   'column:create': columnCreatePayload,
   'column:rename': columnRenamePayload,
   'column:delete': columnDeletePayload,
@@ -198,6 +206,7 @@ type AckFn<T = object> = (ack: Ack<T>) => void;
 export interface ClientToServerEvents {
   'board:join': (p: ClientEventPayload<'board:join'>, ack: (a: JoinAck) => void) => void;
   'board:leave': (p: ClientEventPayload<'board:leave'>, ack?: AckFn) => void;
+  'board:rename': (p: ClientEventPayload<'board:rename'>, ack: AckFn) => void;
   'column:create': (p: ClientEventPayload<'column:create'>, ack: AckFn) => void;
   'column:rename': (p: ClientEventPayload<'column:rename'>, ack: AckFn) => void;
   'column:delete': (p: ClientEventPayload<'column:delete'>, ack: AckFn) => void;

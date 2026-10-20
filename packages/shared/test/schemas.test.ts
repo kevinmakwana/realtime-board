@@ -124,3 +124,25 @@ describe('column:move', () => {
     );
   });
 });
+
+describe('board:rename', () => {
+  const parse = (name: unknown) => clientEventSchemas['board:rename'].safeParse({ boardId: ids.board, name });
+
+  it('accepts a name and trims it', () => {
+    const r = parse('  Launch plan  ');
+    expect(r.success && r.data.name).toBe('Launch plan');
+  });
+
+  it('rejects an empty, blank or over-long name', () => {
+    expect(parse('').success).toBe(false);
+    expect(parse('   ').success).toBe(false);
+    expect(parse('x'.repeat(81)).success).toBe(false);
+    expect(parse('x'.repeat(80)).success).toBe(true);
+  });
+
+  it('knows the board.renamed event', () => {
+    const e = ev(3, 'board.renamed', { name: 'New name' });
+    expect(boardEventSchema.safeParse(e).success).toBe(true);
+    expect(boardEventSchema.safeParse({ ...e, name: undefined }).success).toBe(false);
+  });
+});

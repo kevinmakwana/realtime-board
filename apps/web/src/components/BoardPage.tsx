@@ -42,7 +42,7 @@ function ConnectedBoard({ client, session }: { client: BoardClient; session: Ses
     return (
       <div className="page center">
         <p role="status" data-testid="no-access">
-          You no longer have access to this board.
+          You no longer have access to this board, or it was deleted.
         </p>
         <button type="button" className="btn primary" onClick={() => navigate('/')}>
           Back to boards

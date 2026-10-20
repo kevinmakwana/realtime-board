@@ -436,6 +436,19 @@ export class BoardClient {
     );
   }
 
+  /** Owner only (the server enforces it; this just avoids sending a command that must fail). */
+  renameBoard(name: string): void {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === this.view().board.name) return;
+    if (this.model.role !== 'owner') {
+      this.notice('error', 'Only the board owner can rename it.');
+      return;
+    }
+    this.submit({ kind: 'board.rename', name: trimmed }, 'board', () =>
+      this.emitAck('board:rename', { boardId: this.boardId, name: trimmed }),
+    );
+  }
+
   /** Move to `index` among the other columns (the count does not include the moved one). */
   moveColumn(id: string, index: number): void {
     const columns = selectColumns(this.view());

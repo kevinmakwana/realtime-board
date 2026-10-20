@@ -72,6 +72,7 @@ export const api = {
   magicLink: (email: string) => request<{ ok: true }>('/api/auth/magic-link', { body: { email } }),
   verify: (token: string) => request<Session>('/api/auth/verify', { body: { token } }),
   listBoards: () => request<{ boards: BoardWithRole[] }>('/api/boards'),
+  deleteBoard: (boardId: string) => request<{ ok: true }>(`/api/boards/${boardId}`, { method: 'DELETE' }),
   listMembers: (boardId: string) => request<MembersResponse>(`/api/boards/${boardId}/members`),
   addMember: (boardId: string, email: string, role: GrantableRole) =>
     request<AddMemberResult>(`/api/boards/${boardId}/members`, { body: { email, role } }),

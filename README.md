@@ -114,8 +114,10 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 | --- | --- | --- | --- |
 | `board:join` | `{ boardId, lastSeq? }` | `{ mode: 'snapshot', snapshot }` or `{ mode: 'replay', events, seq }`, plus `instance`, `presence`, `role` | Joins the room first, then reads state. Replays only if the log is contiguous and within `REPLAY_MAX_EVENTS`. Non-members get `NOT_FOUND`. |
 | `board:leave` | `{ boardId }` | `{}` | |
+| `board:rename` | `{ boardId, name }` | `{ seq }` | Owner only (`FORBIDDEN` otherwise). Renaming to the current name writes nothing. |
 | `column:create` | `{ id, boardId, name, position }` | `{ seq }` | Client-generated ids make retries idempotent. |
 | `column:rename` | `{ id, boardId, name }` | `{ seq }` | |
+| `column:move` | `{ id, boardId, position }` | `{ seq }` | Reorder. Answered with a `column.updated` event. A position someone else just took is nudged to a free key next to it. |
 | `column:delete` | `{ id, boardId }` | `{ seq }` | Cascades to its cards. |
 | `card:create` | `{ id, boardId, columnId, title, position }` | `{ seq, version }` | |
 | `card:update` | `{ id, boardId, baseVersion, title?, description? }` | `{ seq, version }` | `VERSION_CONFLICT` if `baseVersion` is stale. |
@@ -134,7 +136,7 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 | `presence:cursor` | `{ socketId, userId, boardId, x, y }` | Not sent back to the sender. |
 | `board:access` | `{ boardId, role }` | Your role changed; `role` is `null` when you were removed from the board (the server also takes you out of its room). |
 
-`board:event` types: `column.created`, `column.updated`, `column.deleted`, `card.created`, `card.updated`, `card.moved`, `card.deleted`, `comment.added`. Card events carry the full card, so applying them is idempotent.
+`board:event` types: `board.renamed`, `column.created`, `column.updated`, `column.deleted`, `card.created`, `card.updated`, `card.moved`, `card.deleted`, `comment.added`. Card events carry the full card, so applying them is idempotent.
 
 ### Acks and errors
 
@@ -164,6 +166,7 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 | `GET /api/boards/:id/members` | Members with names, colours and roles. The owner also gets emails and pending invites. |
 | `POST /api/boards/:id/members` | Owner only. `{ email, role: 'editor' \| 'viewer' }`. An existing user is added at once, anyone else gets a pending invite. |
 | `PATCH /api/boards/:id/members/:userId` | Owner only. `{ role }`. The owner's own role cannot change. |
+| `DELETE /api/boards/:id` | Owner only. Deletes the board with its columns, cards, comments, event log, members and invites (waiting for any command already running), and cuts every member's open tabs off. |
 | `DELETE /api/boards/:id/members/:userId` | The owner removes anyone but themselves; any other member can remove themselves (leave). |
 | `DELETE /api/boards/:id/invites/:email` | Owner only. Withdraw a pending invite. |
 | `GET /health` | Liveness: `{ ok, instance }`. Touches no dependency. |
