@@ -212,6 +212,7 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
 
     command('column:create', async (p) => publish(await service.createColumn(user.id, p)));
     command('column:rename', async (p) => publish(await service.renameColumn(user.id, p)));
+    command('column:move', async (p) => publish(await service.moveColumn(user.id, p)));
     command('column:delete', async (p) => publish(await service.deleteColumn(user.id, p)));
     command('card:create', async (p) => publish(await service.createCard(user.id, p)));
     command('card:update', async (p) => publish(await service.updateCard(user.id, p)));

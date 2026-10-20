@@ -246,6 +246,30 @@ export class BoardService {
     });
   }
 
+  /** Reorder. A drop into a gap someone else just took gets a fresh key next to it, never a duplicate. */
+  async moveColumn(actorId: string, p: ClientEventPayload<'column:move'>): Promise<CommitResult> {
+    if (!isValidOrderKey(p.position)) throw new ServiceError('VALIDATION', 'Invalid position key');
+    return this.commit(p.boardId, actorId, async (tx) => {
+      const current = await tx.query('SELECT position FROM columns WHERE id = $1 AND board_id = $2 FOR UPDATE', [
+        p.id,
+        p.boardId,
+      ]);
+      if (!current.rows[0]) throw new ServiceError('NOT_FOUND', 'Column not found');
+      const sibs = await tx.query('SELECT id, position FROM columns WHERE board_id = $1 AND id <> $2', [
+        p.boardId,
+        p.id,
+      ]);
+      const position = resolveCollision(p.position, sibs.rows as { id: string; position: string }[]);
+      if (position === current.rows[0].position) return null; // already there
+      const { rows } = await tx.query('UPDATE columns SET position = $3 WHERE id = $1 AND board_id = $2 RETURNING *', [
+        p.id,
+        p.boardId,
+        position,
+      ]);
+      return { body: { type: 'column.updated', boardId: p.boardId, actorId, column: toColumn(rows[0]) } };
+    });
+  }
+
   async deleteColumn(actorId: string, p: ClientEventPayload<'column:delete'>): Promise<CommitResult> {
     return this.commit(p.boardId, actorId, async (tx) => {
       const { rowCount } = await tx.query('DELETE FROM columns WHERE id = $1 AND board_id = $2', [p.id, p.boardId]);

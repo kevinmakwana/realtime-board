@@ -81,6 +81,7 @@ export type PendingOp =
   | { kind: 'column.create'; column: Column }
   | { kind: 'column.rename'; id: string; name: string }
   | { kind: 'column.delete'; id: string }
+  | { kind: 'column.move'; id: string; position: string }
   | { kind: 'card.create'; card: Card }
   | { kind: 'card.update'; id: string; title?: string; description?: string }
   | { kind: 'card.move'; id: string; columnId: string; position: string }
@@ -98,6 +99,11 @@ export function applyPending(state: BoardState, ops: readonly PendingOp[]): Boar
       case 'column.rename': {
         const col = s.columns[op.id];
         if (col) s = { ...s, columns: { ...s.columns, [op.id]: { ...col, name: op.name } } };
+        break;
+      }
+      case 'column.move': {
+        const col = s.columns[op.id];
+        if (col) s = { ...s, columns: { ...s.columns, [op.id]: { ...col, position: op.position } } };
         break;
       }
       case 'column.delete': {

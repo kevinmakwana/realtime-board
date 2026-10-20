@@ -55,6 +55,8 @@ export const columnRenamePayload = z.object({
   name: z.string().trim().min(1).max(LIMITS.columnName),
 });
 export const columnDeletePayload = z.object({ id: idSchema, boardId: idSchema });
+/** Reorder: the new fractional key. The server answers with a `column.updated` event. */
+export const columnMovePayload = z.object({ id: idSchema, boardId: idSchema, position: orderKeySchema });
 
 export const cardCreatePayload = z.object({
   id: idSchema,
@@ -111,6 +113,7 @@ export const clientEventSchemas = {
   'column:create': columnCreatePayload,
   'column:rename': columnRenamePayload,
   'column:delete': columnDeletePayload,
+  'column:move': columnMovePayload,
   'card:create': cardCreatePayload,
   'card:update': cardUpdatePayload,
   'card:move': cardMovePayload,
@@ -198,6 +201,7 @@ export interface ClientToServerEvents {
   'column:create': (p: ClientEventPayload<'column:create'>, ack: AckFn) => void;
   'column:rename': (p: ClientEventPayload<'column:rename'>, ack: AckFn) => void;
   'column:delete': (p: ClientEventPayload<'column:delete'>, ack: AckFn) => void;
+  'column:move': (p: ClientEventPayload<'column:move'>, ack: AckFn) => void;
   'card:create': (p: ClientEventPayload<'card:create'>, ack: AckFn) => void;
   'card:update': (p: ClientEventPayload<'card:update'>, ack: AckFn) => void;
   'card:move': (p: ClientEventPayload<'card:move'>, ack: AckFn) => void;

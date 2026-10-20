@@ -436,6 +436,19 @@ export class BoardClient {
     );
   }
 
+  /** Move to `index` among the other columns (the count does not include the moved one). */
+  moveColumn(id: string, index: number): void {
+    const columns = selectColumns(this.view());
+    const from = columns.findIndex((c) => c.id === id);
+    if (from === -1) return;
+    const others = columns.filter((c) => c.id !== id);
+    if (from === Math.max(0, Math.min(index, others.length))) return; // dropped where it already is
+    const position = keyForIndex(others, index);
+    this.submit({ kind: 'column.move', id, position }, 'board', () =>
+      this.emitAck('column:move', { id, boardId: this.boardId, position }),
+    );
+  }
+
   renameColumn(id: string, name: string): void {
     if (!name.trim()) return;
     this.submit({ kind: 'column.rename', id, name: name.trim() }, 'board', () =>

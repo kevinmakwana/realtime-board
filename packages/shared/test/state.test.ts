@@ -91,3 +91,26 @@ describe('applyPending (optimistic overlay)', () => {
     expect(view.cards[ids.card1]).toBeUndefined();
   });
 });
+
+describe('applyPending: column.move', () => {
+  it('reorders columns in the view without touching authoritative state', () => {
+    const s = base(); // Todo (a0), Doing (a1)
+    const view = applyPending(s, [{ kind: 'column.move', id: ids.colA, position: 'a2' }]);
+    expect(selectColumns(view).map((c) => c.name)).toEqual(['Doing', 'Todo']);
+    expect(selectColumns(s).map((c) => c.name)).toEqual(['Todo', 'Doing']);
+  });
+
+  it('ignores a move for a column that no longer exists', () => {
+    const s = base();
+    const view = applyPending(s, [{ kind: 'column.move', id: ids.card3, position: 'a9' }]);
+    expect(selectColumns(view).map((c) => c.name)).toEqual(['Todo', 'Doing']);
+  });
+});
+
+describe('applyEvent: column.updated carries a move', () => {
+  it('re-sorts columns when the position changes', () => {
+    const moved = { ...column(ids.colA, 'a2', 'Todo') };
+    const s = applyEvent(base(), ev(5, 'column.updated', { column: moved }));
+    expect(selectColumns(s).map((c) => c.name)).toEqual(['Doing', 'Todo']);
+  });
+});

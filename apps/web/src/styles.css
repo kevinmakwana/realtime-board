@@ -634,3 +634,14 @@ textarea {
   flex: 1;
   min-width: 0;
 }
+
+/* ---------- column drag ---------- */
+.lane-head[draggable="true"] {
+  cursor: grab;
+}
+.lane.col-drop-before {
+  box-shadow: -4px 0 0 var(--accent);
+}
+.lane.col-drop-after {
+  box-shadow: 4px 0 0 var(--accent);
+}

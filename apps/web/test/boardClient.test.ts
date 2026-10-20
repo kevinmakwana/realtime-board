@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { selectCards, type BoardEvent, type BoardSnapshot, type Card } from '@board/shared';
+import { selectCards, selectColumns, type BoardEvent, type BoardSnapshot, type Card } from '@board/shared';
 import { BoardClient, type BoardSocket } from '../src/lib/boardClient';
 
 const uid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -382,5 +382,61 @@ describe('healing lost broadcasts', () => {
     socket.last('board:join').ack!(null, { ok: false, code: 'NOT_FOUND', message: 'Board not found' });
     await vi.advanceTimersByTimeAsync(0);
     expect(client.getSnapshot().status).toBe('removed');
+  });
+});
+
+describe('column reorder', () => {
+  const colOrder = (client: BoardClient) => selectColumns(client.getSnapshot().state!).map((c) => c.id);
+
+  it('shows the new order at once and sends the new key', async () => {
+    const { socket, client } = await setup(); // To do (a0), Done (a1)
+    client.moveColumn(COL_A, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(colOrder(client)).toEqual([COL_B, COL_A]);
+    const sent = socket.last('column:move').payload;
+    expect(sent).toMatchObject({ id: COL_A, boardId: BOARD });
+    expect(sent.position > 'a1').toBe(true);
+  });
+
+  it('keeps the order through ack and the confirming event', async () => {
+    const { socket, client } = await setup(3);
+    client.moveColumn(COL_A, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    const { position } = socket.last('column:move').payload;
+    socket.last('column:move').ack!(null, { ok: true, seq: 4 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(colOrder(client)).toEqual([COL_B, COL_A]);
+    socket.fire('board:event', {
+      seq: 4,
+      type: 'column.updated',
+      boardId: BOARD,
+      actorId: ME.id,
+      ts: 'x',
+      column: { id: COL_A, boardId: BOARD, name: 'To do', position },
+    });
+    expect(colOrder(client)).toEqual([COL_B, COL_A]);
+    expect(client.getSnapshot().state?.seq).toBe(4);
+  });
+
+  it('puts the column back and says why when the server refuses', async () => {
+    const { socket, client } = await setup();
+    const notices: string[] = [];
+    client.onNotice((n) => notices.push(n.message));
+    client.moveColumn(COL_A, 1);
+    await vi.advanceTimersByTimeAsync(0);
+    socket.last('column:move').ack!(null, { ok: false, code: 'VALIDATION', message: 'Invalid position key' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(colOrder(client)).toEqual([COL_A, COL_B]);
+    expect(notices).toContain('Invalid position key');
+  });
+
+  it('does nothing for a viewer, or when the column would not move', async () => {
+    const viewer = await setup(3, 'viewer');
+    viewer.client.moveColumn(COL_A, 1);
+    expect(viewer.socket.count('column:move')).toBe(0);
+
+    const { socket, client } = await setup();
+    client.moveColumn(COL_A, 0); // already first
+    expect(socket.count('column:move')).toBe(0);
   });
 });

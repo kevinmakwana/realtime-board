@@ -106,3 +106,21 @@ describe('membership schemas', () => {
     expect(ERROR_CODES).toContain('FORBIDDEN');
   });
 });
+
+describe('column:move', () => {
+  it('accepts an id, a board and a position key', () => {
+    expect(clientEventSchemas['column:move'].safeParse({ id: uuid, boardId: ids.board, position: 'a1' }).success).toBe(
+      true,
+    );
+  });
+
+  it('rejects a missing or empty position and a non-uuid id', () => {
+    expect(clientEventSchemas['column:move'].safeParse({ id: uuid, boardId: ids.board }).success).toBe(false);
+    expect(clientEventSchemas['column:move'].safeParse({ id: uuid, boardId: ids.board, position: '' }).success).toBe(
+      false,
+    );
+    expect(clientEventSchemas['column:move'].safeParse({ id: 'x', boardId: ids.board, position: 'a1' }).success).toBe(
+      false,
+    );
+  });
+});
