@@ -27,6 +27,9 @@ export const card = (id: string, columnId: string, position: string, extra: Part
   position,
   version: 1,
   updatedAt: '2026-01-01T00:00:00.000Z',
+  dueDate: null,
+  assigneeIds: [],
+  labels: [],
   ...extra,
 });
 

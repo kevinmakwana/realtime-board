@@ -1,6 +1,6 @@
 import type { BoardEvent } from './events.js';
 import { compareOrdered } from './ordering.js';
-import type { Board, BoardSnapshot, Card, Column, Comment } from './models.js';
+import { type Board, type BoardSnapshot, type Card, type Column, type Comment, normalizeCard } from './models.js';
 
 /** Authoritative board state: only ever changed by sequenced server events. */
 export interface BoardState {
@@ -56,7 +56,7 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
     case 'card.created':
     case 'card.updated':
     case 'card.moved':
-      next.cards = { ...state.cards, [e.card.id]: e.card };
+      next.cards = { ...state.cards, [e.card.id]: normalizeCard(e.card) };
       break;
     case 'card.deleted': {
       const { [e.cardId]: _removed, ...cards } = state.cards;
@@ -93,7 +93,15 @@ export type PendingOp =
   | { kind: 'column.delete'; id: string }
   | { kind: 'column.move'; id: string; position: string }
   | { kind: 'card.create'; card: Card }
-  | { kind: 'card.update'; id: string; title?: string; description?: string }
+  | {
+      kind: 'card.update';
+      id: string;
+      title?: string;
+      description?: string;
+      dueDate?: string | null;
+      assigneeIds?: string[];
+      labels?: string[];
+    }
   | { kind: 'card.move'; id: string; columnId: string; position: string }
   | { kind: 'card.delete'; id: string }
   | { kind: 'comment.add'; comment: Comment }
@@ -144,6 +152,9 @@ export function applyPending(state: BoardState, ops: readonly PendingOp[]): Boar
                 ...card,
                 ...(op.title !== undefined && { title: op.title }),
                 ...(op.description !== undefined && { description: op.description }),
+                ...(op.dueDate !== undefined && { dueDate: op.dueDate }),
+                ...(op.assigneeIds !== undefined && { assigneeIds: op.assigneeIds }),
+                ...(op.labels !== undefined && { labels: op.labels }),
               },
             },
           };

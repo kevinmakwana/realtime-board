@@ -171,3 +171,46 @@ describe('comment:edit and comment:delete', () => {
     ).toBe(false);
   });
 });
+
+describe('card:update extra fields', () => {
+  const update = (extra: Record<string, unknown>) =>
+    clientEventSchemas['card:update'].safeParse({ id: uuid, boardId: ids.board, baseVersion: 1, ...extra });
+
+  it('accepts a real due date and null (to clear it), and counts null as a change', () => {
+    expect(update({ dueDate: '2026-03-15' }).success).toBe(true);
+    expect(update({ dueDate: '2028-02-29' }).success).toBe(true); // leap day
+    expect(update({ dueDate: null }).success).toBe(true);
+  });
+
+  it('rejects anything that is not a real calendar date', () => {
+    for (const bad of ['2026-02-30', '2026-13-01', '15/03/2026', 'tomorrow', '2026-3-5', '2026-03-15T10:00:00Z', '']) {
+      expect(update({ dueDate: bad }).success, bad).toBe(false);
+    }
+  });
+
+  it('accepts member ids and caps how many people can be assigned', () => {
+    expect(update({ assigneeIds: [uuid] }).success).toBe(true);
+    expect(update({ assigneeIds: [] }).success).toBe(true);
+    expect(update({ assigneeIds: ['nope'] }).success).toBe(false);
+    expect(
+      update({
+        assigneeIds: Array.from({ length: 11 }, (_, i) => `00000000-0000-4000-8000-${String(i).padStart(12, '0')}`),
+      }).success,
+    ).toBe(false);
+  });
+
+  it('trims labels and enforces their length and count', () => {
+    const ok = update({ labels: ['  bug  ', 'ui'] });
+    expect(ok.success && ok.data.labels).toEqual(['bug', 'ui']);
+    expect(update({ labels: [''] }).success).toBe(false);
+    expect(update({ labels: ['   '] }).success).toBe(false);
+    expect(update({ labels: ['x'.repeat(25)] }).success).toBe(false);
+    expect(update({ labels: ['x'.repeat(24)] }).success).toBe(true);
+    expect(update({ labels: ['a', 'b', 'c', 'd', 'e'] }).success).toBe(true);
+    expect(update({ labels: ['a', 'b', 'c', 'd', 'e', 'f'] }).success).toBe(false);
+  });
+
+  it('still rejects an update that changes nothing', () => {
+    expect(update({}).success).toBe(false);
+  });
+});

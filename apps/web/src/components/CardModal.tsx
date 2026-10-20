@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { selectComments, type BoardState, type Card } from '@board/shared';
+import { LIMITS, selectComments, type BoardState, type Card, type Member } from '@board/shared';
 import type { BoardClient } from '../lib/boardClient';
+import { labelHue } from '../lib/cardMeta';
 import { CommentItem } from './CommentItem';
 
 interface Props {
@@ -8,20 +9,29 @@ interface Props {
   state: BoardState;
   client: BoardClient;
   editors: { name: string; color: string }[];
+  members: Member[];
   readOnly: boolean;
   selfUserId: string;
   isOwner: boolean;
   onClose: () => void;
 }
 
-export function CardModal({ card, state, client, editors, readOnly, selfUserId, isOwner, onClose }: Props) {
+export function CardModal({ card, state, client, editors, members, readOnly, selfUserId, isOwner, onClose }: Props) {
   const [title, setTitle] = useState(card.title);
   const [description, setDescription] = useState(card.description);
   const [comment, setComment] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+  // The date is typed in segments, so hold it locally and save only once it is a complete date.
+  const [dueDraft, setDueDraft] = useState(card.dueDate ?? '');
+  useEffect(() => setDueDraft(card.dueDate ?? ''), [card.dueDate]);
   // The version our draft is based on; if the server moves past it while we have unsaved text, say so.
   const baseline = useRef({ title: card.title, description: card.description, version: card.version });
   const dirty = title !== baseline.current.title || description !== baseline.current.description;
-  const remoteChanged = card.version > baseline.current.version && dirty;
+  // Only a change to the text we are editing counts: our own date/label/assignee saves also bump the version.
+  const remoteChanged =
+    card.version > baseline.current.version &&
+    dirty &&
+    (card.title !== baseline.current.title || card.description !== baseline.current.description);
   const comments = selectComments(state, card.id);
   const column = state.columns[card.columnId];
 
@@ -40,6 +50,21 @@ export function CardModal({ card, state, client, editors, readOnly, selfUserId, 
     baseline.current = { title: card.title, description: card.description, version: card.version };
     setTitle(card.title);
     setDescription(card.description);
+  }
+
+  function addLabel() {
+    const label = newLabel.trim();
+    setNewLabel('');
+    if (!label || card.labels.length >= LIMITS.labelsPerCard) return;
+    if (card.labels.some((l) => l.toLowerCase() === label.toLowerCase())) return;
+    client.updateCard(card.id, { labels: [...card.labels, label] });
+  }
+
+  function toggleAssignee(userId: string, on: boolean) {
+    // People who have left the board can no longer be re-sent, so they drop off the card with this change.
+    const onBoard = new Set(members.map((m) => m.userId));
+    const rest = card.assigneeIds.filter((id) => id !== userId && onBoard.has(id));
+    client.updateCard(card.id, { assigneeIds: on ? [...rest, userId] : rest });
   }
 
   const focus = () => client.setEditing(card.id);
@@ -109,6 +134,87 @@ export function CardModal({ card, state, client, editors, readOnly, selfUserId, 
             }
           />
         </label>
+
+        <div className="field-row">
+          <label className="field">
+            Due date
+            <input
+              type="date"
+              value={dueDraft}
+              disabled={readOnly}
+              onChange={(e) => {
+                setDueDraft(e.target.value);
+                if (/^[1-9]\d{3}-\d{2}-\d{2}$/.test(e.target.value) && e.target.value !== card.dueDate) {
+                  client.updateCard(card.id, { dueDate: e.target.value });
+                }
+              }}
+              onBlur={() => {
+                if (dueDraft === '' && card.dueDate) client.updateCard(card.id, { dueDate: null });
+                else setDueDraft(card.dueDate ?? '');
+              }}
+            />
+          </label>
+          {!readOnly && card.dueDate && (
+            <button type="button" className="btn ghost" onClick={() => client.updateCard(card.id, { dueDate: null })}>
+              Clear due date
+            </button>
+          )}
+        </div>
+
+        <div className="field">
+          Labels
+          <ul className="label-chips editable">
+            {card.labels.map((label) => (
+              <li key={label} className="label-chip" style={{ '--hue': labelHue(label) } as React.CSSProperties}>
+                {label}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    className="chip-x"
+                    aria-label={`Remove label ${label}`}
+                    onClick={() => client.updateCard(card.id, { labels: card.labels.filter((l) => l !== label) })}
+                  >
+                    ×
+                  </button>
+                )}
+              </li>
+            ))}
+            {card.labels.length === 0 && <li className="note">No labels.</li>}
+          </ul>
+          {!readOnly && card.labels.length < LIMITS.labelsPerCard && (
+            <input
+              aria-label="Add label"
+              placeholder="Add a label, press Enter"
+              value={newLabel}
+              maxLength={LIMITS.labelLength}
+              onChange={(e) => setNewLabel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                addLabel();
+              }}
+            />
+          )}
+        </div>
+
+        <fieldset className="assignees">
+          <legend>Assignees</legend>
+          {members.length === 0 && <p className="note">No members to assign.</p>}
+          {members.map((m) => (
+            <label key={m.userId} className="assignee-option">
+              <input
+                type="checkbox"
+                checked={card.assigneeIds.includes(m.userId)}
+                disabled={readOnly}
+                onChange={(e) => toggleAssignee(m.userId, e.target.checked)}
+              />
+              <span className="avatar avatar-sm" style={{ background: m.color }} aria-hidden>
+                {m.name[0]}
+              </span>
+              {m.name}
+            </label>
+          ))}
+        </fieldset>
 
         <h3>Comments</h3>
         <ul className="comments">

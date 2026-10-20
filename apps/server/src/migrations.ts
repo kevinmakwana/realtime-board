@@ -105,4 +105,14 @@ export const migrations: { id: number; name: string; sql: string }[] = [
       ALTER TABLE comments ADD COLUMN edited_at timestamptz;
     `,
   },
+  {
+    id: 4,
+    name: 'card due date, assignees and labels',
+    sql: `
+      ALTER TABLE cards
+        ADD COLUMN due_date     date,
+        ADD COLUMN assignee_ids uuid[] NOT NULL DEFAULT '{}',
+        ADD COLUMN labels       text[] NOT NULL DEFAULT '{}';
+    `,
+  },
 ];

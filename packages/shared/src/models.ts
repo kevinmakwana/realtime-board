@@ -70,6 +70,11 @@ export const cardSchema = z.object({
   /** Incremented on every accepted change; clients send the version they based an edit on. */
   version: z.number().int().nonnegative(),
   updatedAt: z.string(),
+  /** `YYYY-MM-DD`, or null. Log entries written before this field existed lack it: see `normalizeCard`. */
+  dueDate: z.string().nullable(),
+  /** Ids of board members the card is assigned to. A member who later leaves may linger here; the UI only shows current members. */
+  assigneeIds: z.array(idSchema),
+  labels: z.array(z.string()),
 });
 export type Card = z.infer<typeof cardSchema>;
 
@@ -102,4 +107,21 @@ export const LIMITS = {
   cardTitle: 200,
   cardDescription: 5000,
   commentBody: 2000,
+  labelLength: 24,
+  labelsPerCard: 5,
+  assigneesPerCard: 10,
 } as const;
+
+/** A real calendar date written `YYYY-MM-DD` (so not 2026-02-30). */
+export function isRealDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const d = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === value;
+}
+export const dueDateSchema = z.string().refine(isRealDate, { message: 'expected a date like 2026-03-15' });
+
+/** Cards in log entries written before due dates, assignees and labels existed lack those fields. */
+export function normalizeCard(card: Card): Card {
+  if (card.dueDate !== undefined && card.assigneeIds && card.labels) return card;
+  return { ...card, dueDate: card.dueDate ?? null, assigneeIds: card.assigneeIds ?? [], labels: card.labels ?? [] };
+}

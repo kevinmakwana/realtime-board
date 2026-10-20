@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { selectColumns, type BoardState } from '@board/shared';
-import type { Session } from '../api';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { selectColumns, type BoardState, type Member } from '@board/shared';
+import { api, type Session } from '../api';
 import type { BoardClient, BoardViewModel } from '../lib/boardClient';
 import { navigate } from '../router';
 import { CardModal } from './CardModal';
@@ -24,6 +24,10 @@ export function BoardView({ client, vm, state, session }: Props) {
   const [renamingBoard, setRenamingBoard] = useState(false);
   const [boardName, setBoardName] = useState('');
   const readOnly = vm.role === 'viewer';
+  const [memberList, setMemberList] = useState<Member[]>([]);
+  const boardId = state.board.id;
+  const members = useMemo(() => new Map(memberList.map((m) => [m.userId, m])), [memberList]);
+  const lastTried = useRef('');
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [draggingColumnId, setDraggingColumnId] = useState<string | null>(null);
   const [columnDropIndex, setColumnDropIndex] = useState<number | null>(null);
@@ -49,6 +53,32 @@ export function BoardView({ client, vm, state, session }: Props) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+
+  const loadMembers = useCallback(async () => {
+    try {
+      setMemberList((await api.listMembers(boardId)).members);
+    } catch {
+      // Names and avatars are cosmetic; the board works without them.
+    }
+  }, [boardId]);
+
+  // Reload when our own role changes, the Share dialog closes, or a card opens (the assignee picker must be current):
+  // any of them may follow a change to who is on the board.
+  useEffect(() => {
+    void loadMembers();
+  }, [loadMembers, vm.role, sharing, openCardId]);
+
+  // A card can be assigned to someone who joined after we last looked; fetch once per unknown set.
+  const unknownAssignees = Object.values(state.cards)
+    .flatMap((c) => c.assigneeIds)
+    .filter((id) => !members.has(id))
+    .sort()
+    .join(',');
+  useEffect(() => {
+    if (!unknownAssignees || unknownAssignees === lastTried.current) return;
+    lastTried.current = unknownAssignees;
+    void loadMembers();
+  }, [unknownAssignees, loadMembers]);
 
   const columns = selectColumns(state);
 
@@ -167,6 +197,7 @@ export function BoardView({ client, vm, state, session }: Props) {
               draggingId={draggingId}
               setDraggingId={setDraggingId}
               editorsByCard={editorsByCard}
+              members={members}
               onOpenCard={setOpenCardId}
               readOnly={readOnly}
               setDraggingColumnId={(id) => (id ? setDraggingColumnId(id) : finishColumnDrag())}
@@ -230,6 +261,7 @@ export function BoardView({ client, vm, state, session }: Props) {
           state={state}
           client={client}
           editors={editorsByCard.get(openCard.id) ?? []}
+          members={memberList}
           readOnly={readOnly}
           selfUserId={session.user.id}
           isOwner={vm.role === 'owner'}

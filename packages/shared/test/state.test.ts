@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { applyEvent, applyEvents, applyPending, selectCards, selectColumns, stateFromSnapshot } from '../src/index.js';
+import {
+  applyEvent,
+  applyEvents,
+  applyPending,
+  normalizeCard,
+  selectCards,
+  selectColumns,
+  stateFromSnapshot,
+} from '../src/index.js';
 import { board, card, column, comment, ev, ids } from './fixtures.js';
 
 const base = () =>
@@ -163,5 +171,39 @@ describe('comment edits and deletes', () => {
   it('ignores a pending edit of a comment that is already gone', () => {
     const view = applyPending(base(), [{ kind: 'comment.edit', id: ids.card3, body: 'x' }]);
     expect(Object.keys(view.comments)).toEqual([]);
+  });
+});
+
+describe('card fields', () => {
+  it('fills in the new fields for cards from log entries written before they existed', () => {
+    const { dueDate: _d, assigneeIds: _a, labels: _l, ...legacy } = card(ids.card3, ids.colA, 'a2');
+    const s = applyEvent(base(), ev(5, 'card.created', { card: legacy as never }));
+    expect(s.cards[ids.card3]).toMatchObject({ dueDate: null, assigneeIds: [], labels: [] });
+    expect(normalizeCard(legacy as never)).toMatchObject({ dueDate: null, assigneeIds: [], labels: [] });
+  });
+
+  it('leaves a complete card untouched', () => {
+    const full = card(ids.card1, ids.colA, 'a0', { dueDate: '2026-03-15', labels: ['bug'], assigneeIds: [ids.user] });
+    expect(normalizeCard(full)).toBe(full);
+  });
+
+  it('shows pending due date, assignee and label changes in the view only', () => {
+    const s = base();
+    const view = applyPending(s, [
+      { kind: 'card.update', id: ids.card1, dueDate: '2026-03-15', assigneeIds: [ids.user], labels: ['bug'] },
+    ]);
+    expect(view.cards[ids.card1]).toMatchObject({ dueDate: '2026-03-15', assigneeIds: [ids.user], labels: ['bug'] });
+    expect(s.cards[ids.card1]).toMatchObject({ dueDate: null, assigneeIds: [], labels: [] });
+  });
+
+  it('clears a due date with null, and an empty list clears assignees', () => {
+    const s = applyEvent(
+      base(),
+      ev(5, 'card.updated', {
+        card: card(ids.card1, ids.colA, 'a0', { dueDate: '2026-03-15', assigneeIds: [ids.user] }),
+      }),
+    );
+    const view = applyPending(s, [{ kind: 'card.update', id: ids.card1, dueDate: null, assigneeIds: [] }]);
+    expect(view.cards[ids.card1]).toMatchObject({ dueDate: null, assigneeIds: [] });
   });
 });
