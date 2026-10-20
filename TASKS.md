@@ -37,9 +37,12 @@
   - Verified: 6 client unit tests, 2 server tests, and a real-client integration test that commits a change without broadcasting it and watches the client catch up
 
 ### Phase 3: Product depth
-- [ ] **Column reorder** - new `column:move` event: schema in events.ts, service method, gateway line, reducer case, UI drag
-- [ ] **Board rename and delete** - new events or REST routes; owner-only once membership lands
-- [ ] **Comment edit and delete** - new events, author-only
+- [x] ~~**Column reorder**~~ (2026-10-20)
+  - `column:move` command answered with the existing `column.updated` event (no new reducer case); collisions get a fresh key, a move to the same place writes nothing; drag a column header, with a drop marker. Verified: shared, server (two instances), client unit and an e2e across two instances
+- [x] ~~**Board rename and delete**~~ (2026-10-20)
+  - Owner only. Rename is `board:rename` + `board.renamed` (live, in the log); delete is `DELETE /api/boards/:id` under the board lock, cascades, and cuts every member off. Found and fixed a connection leak in `getSnapshot` for missing boards on the way. Verified incl. delete-waits-for-in-flight-command and an e2e
+- [x] ~~**Comment edit and delete**~~ (2026-10-20)
+  - `comment:edit` (author only) and `comment:delete` (author or board owner), `comment.updated`/`comment.deleted` events, migration 3 (`edited_at`), inline editor and "(edited)" marker. Verified: server matrix, client unit, e2e with moderation
 - [ ] **Card assignees, labels, due dates** - extend `cardSchema` and the migrations
 - [ ] **Activity feed UI** - the data already exists in `board_events`
 - [ ] **Search** - cards and comments within a board
