@@ -129,7 +129,11 @@ export function Column({
             {column.name}
           </h2>
         )}
-        <span className="count" role="img" aria-label={`${cards.length} cards`}>
+        <span
+          className="count"
+          role="img"
+          aria-label={filter ? `${cards.length} of ${allCards.length} cards match` : `${cards.length} cards`}
+        >
           {filter ? `${cards.length}/${allCards.length}` : cards.length}
         </span>
         {!readOnly && (
@@ -139,7 +143,7 @@ export function Column({
             aria-label={`Delete column ${column.name}`}
             title="Delete column"
             onClick={() => {
-              if (window.confirm(`Delete "${column.name}" and its ${cards.length} card(s)?`))
+              if (window.confirm(`Delete "${column.name}" and its ${allCards.length} card(s)?`))
                 client.deleteColumn(column.id);
             }}
           >

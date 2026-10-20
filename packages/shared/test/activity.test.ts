@@ -109,6 +109,16 @@ describe('describeActivity', () => {
     expect(out[0]?.text).toBe('added card “Task” to “To do”');
   });
 
+  it('does not trust a seeded column name once the column is renamed inside the window', () => {
+    const c = card(ids.card1, ids.colA, 'a0', { title: 'Task' });
+    const out = describeActivity(
+      [ev(1, 'card.created', { card: c }), ev(2, 'column.updated', { column: column(ids.colA, 'a0', 'Backlog') })],
+      nameOf,
+      { knownColumns: [{ id: ids.colA, name: 'Backlog', position: 'a0' }] },
+    ).map((e) => e.text);
+    expect(out).toEqual(['added card “Task”', 'updated column “Backlog”']); // not “moved”, and no wrong “to Backlog”
+  });
+
   it('only returns the entries asked for when given a lookback', () => {
     const c = card(ids.card1, ids.colA, 'a0', { title: 'Task' });
     const all = [ev(1, 'card.created', { card: c }), ev(2, 'card.deleted', { cardId: ids.card1 })];

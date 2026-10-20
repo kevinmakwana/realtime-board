@@ -51,6 +51,7 @@ export function BoardView({ client, vm, state, session }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      if ((e.target as HTMLElement).closest?.('.search')) return; // Escape there only clears the search
       setOpenCardId(null);
       setSharing(false);
       setShowActivity(false);

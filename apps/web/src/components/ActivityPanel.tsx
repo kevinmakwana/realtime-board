@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ActivityEntry } from '@board/shared';
 import { api } from '../api';
 
@@ -21,24 +21,38 @@ export function ActivityPanel({ boardId, seq, onClose }: Props) {
   const [entries, setEntries] = useState<ActivityEntry[] | null>(null);
   const [error, setError] = useState('');
 
-  // Reload shortly after the board changes, so a burst of edits is one request.
+  const started = useRef(0); // requests sent so far
+  const applied = useRef(0); // the newest request whose answer is on screen
+  const mounted = useRef(true);
+  const loaded = useRef(false);
   useEffect(() => {
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        const r = await api.activity(boardId);
-        if (!cancelled) {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // Reload shortly after the board changes, so a burst of edits is one request. The first load is immediate, and an
+  // answer is never discarded just because the board moved on while it was in flight (a busy board would otherwise
+  // never show anything); an older answer arriving after a newer one is ignored.
+  useEffect(() => {
+    const timer = setTimeout(
+      async () => {
+        const mine = ++started.current;
+        try {
+          const r = await api.activity(boardId);
+          if (!mounted.current || mine < applied.current) return;
+          applied.current = mine;
+          loaded.current = true;
           setEntries(r.entries);
           setError('');
+        } catch (e) {
+          if (mounted.current) setError(e instanceof Error ? e.message : 'Could not load activity');
         }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : 'Could not load activity');
-      }
-    }, 250);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
+      },
+      loaded.current ? 250 : 0,
+    );
+    return () => clearTimeout(timer);
   }, [boardId, seq]);
 
   return (

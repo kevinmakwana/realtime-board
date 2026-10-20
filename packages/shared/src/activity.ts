@@ -14,8 +14,9 @@ export interface DescribeOptions {
   /** Return only entries with seq >= from; earlier events still teach the titles and names used in the text. */
   from?: number;
   /**
-   * Columns that exist without a `column.created` event (a new board's defaults are seeded, not logged).
-   * Later events override these, so a column renamed since is still described as it was at the time.
+   * Columns that exist without a `column.created` event (a new board's defaults are seeded, not logged), as they
+   * are now. A column with a `column.updated` in the window is ignored here: its current name may not be the
+   * one it had earlier, and guessing would describe the past wrongly.
    */
   knownColumns?: { id: string; name: string; position: string }[];
 }
@@ -33,8 +34,9 @@ export function describeActivity(
   nameOf: (userId: string) => string | undefined,
   { from = 0, knownColumns = [] }: DescribeOptions = {},
 ): ActivityEntry[] {
+  const updated = new Set(events.flatMap((e) => (e.type === 'column.updated' ? [e.column.id] : [])));
   const columns = new Map<string, { name: string; position: string }>(
-    knownColumns.map((c) => [c.id, { name: c.name, position: c.position }]),
+    knownColumns.filter((c) => !updated.has(c.id)).map((c) => [c.id, { name: c.name, position: c.position }]),
   );
   const cards = new Map<string, ReturnType<typeof normalizeCard>>();
   const commentCard = new Map<string, string>();
@@ -59,10 +61,9 @@ export function describeActivity(
       case 'column.updated': {
         const before = columns.get(e.column.id);
         columns.set(e.column.id, { name: e.column.name, position: e.column.position });
-        text =
-          before && before.name !== e.column.name
-            ? `renamed column ${q(before.name)} to ${q(e.column.name)}`
-            : `moved column ${q(e.column.name)}`;
+        if (!before) text = `updated column ${q(e.column.name)}`;
+        else if (before.name !== e.column.name) text = `renamed column ${q(before.name)} to ${q(e.column.name)}`;
+        else text = `moved column ${q(e.column.name)}`;
         break;
       }
       case 'column.deleted': {
