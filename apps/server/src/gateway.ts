@@ -159,14 +159,6 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
         // and the client de-duplicates by seq, so we can neither miss nor double-apply an event.
         await socket.join(roomOf(boardId));
         socket.data.boards.add(boardId);
-        // applyAccessLocal skips sockets that are not on the board yet, so a removal or downgrade that
-        // landed since the check above was missed. From here on every change reaches us; read the
-        // role again to pick up anything we missed, and use it (not the stale one) in the ack.
-        const role = await service.role(boardId, user.id);
-        if (!role) {
-          await leaveBoard(socket, boardId);
-          throw new ServiceError('NOT_FOUND', 'Board not found');
-        }
         // Keep our existing roster entry (and its "is editing" state) unless it has vanished.
         let members = alreadyOnBoard ? await presence.list(boardId) : [];
         const needsAnnouncing = !alreadyOnBoard || !members.some((m) => m.socketId === socket.id);
@@ -181,6 +173,14 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
           await presence.join(boardId, member);
         }
 
+        /** The board can be deleted while we are joining: refuse, and take the socket back off the roster. */
+        const readSnapshot = async () => {
+          const snapshot = await service.getSnapshot(boardId);
+          if (snapshot) return snapshot;
+          await leaveBoard(socket, boardId);
+          throw new ServiceError('NOT_FOUND', 'Board not found');
+        };
+
         let result: Pick<JoinAck & { ok: true }, 'mode'> & Record<string, unknown>;
         const behind = lastSeq !== undefined ? head - lastSeq : null;
         if (lastSeq !== undefined && behind !== null && behind >= 0 && behind <= config.REPLAY_MAX_EVENTS) {
@@ -189,10 +189,20 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
           if (events.length === behind) {
             result = { mode: 'replay', events, seq: events.at(-1)?.seq ?? lastSeq };
           } else {
-            result = { mode: 'snapshot', snapshot: (await service.getSnapshot(boardId))! };
+            result = { mode: 'snapshot', snapshot: await readSnapshot() };
           }
         } else {
-          result = { mode: 'snapshot', snapshot: (await service.getSnapshot(boardId))! };
+          result = { mode: 'snapshot', snapshot: await readSnapshot() };
+        }
+
+        // Everything above can race with a removal or a board delete. applyAccessLocal skips sockets that
+        // are not on the board yet, but this one is registered now, so any change after this check reaches
+        // it as a board:access event. Read the role once more to catch what happened before, and put it
+        // (not a stale one) in the ack.
+        const role = await service.role(boardId, user.id);
+        if (!role) {
+          await leaveBoard(socket, boardId);
+          throw new ServiceError('NOT_FOUND', 'Board not found');
         }
 
         if (needsAnnouncing) members = await broadcastPresence(boardId);

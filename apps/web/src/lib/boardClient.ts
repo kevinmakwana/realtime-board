@@ -217,6 +217,8 @@ export class BoardClient {
       }
       return;
     }
+    // Access can be revoked while a join is in flight; an answer that arrives afterwards must not undo it.
+    if (this.model.status === 'removed') return;
     if (ack.mode === 'snapshot') {
       this.auth = stateFromSnapshot(ack.snapshot);
       this.buffer.reset(ack.snapshot.seq);

@@ -3,7 +3,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { AccessChange } from '@board/shared';
 import { upsertUser } from '../src/auth.js';
 import { MembershipService } from '../src/membership.js';
-import { createWorld } from './helpers.js';
+import { createWorld, waitUntilBlocked } from './helpers.js';
 
 const world = createWorld();
 afterAll(() => world.close());
@@ -204,10 +204,10 @@ describe('ordering against in-flight commands', () => {
         title: 'In flight',
         position: 'a0',
       });
-      await new Promise((r) => setTimeout(r, 250));
+      await waitUntilBlocked(world.pool, 1); // the command is stalled on the cards lock
 
       removal = members.removeMember(boardId, owner.id, editor.id);
-      await new Promise((r) => setTimeout(r, 300));
+      await waitUntilBlocked(world.pool, 2); // and the removal is queued behind it on the board lock
       // The removal must queue behind the command instead of overtaking it.
       expect(await world.service.role(boardId, editor.id)).toBe('editor');
     } finally {

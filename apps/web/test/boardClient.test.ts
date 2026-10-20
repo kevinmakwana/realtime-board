@@ -636,3 +636,26 @@ describe('comment edit and delete', () => {
     expect(bodies(client)).toEqual(['Comment 1']);
   });
 });
+
+describe('a join answered after access was revoked', () => {
+  it('does not bring a removed board back to life', async () => {
+    const { socket, client } = await setup(3, 'editor');
+    await vi.advanceTimersByTimeAsync(40_000); // a periodic check goes out
+    expect(socket.count('board:join')).toBe(2);
+    socket.fire('board:access', { boardId: BOARD, role: null }); // revoked while it is in flight
+    expect(client.getSnapshot().status).toBe('removed');
+
+    socket.last('board:join').ack!(null, {
+      ok: true,
+      mode: 'replay',
+      events: [],
+      seq: 3,
+      instance: 'server-1',
+      presence: [],
+      role: 'editor',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(client.getSnapshot().status).toBe('removed');
+    expect(client.getSnapshot().role).toBeNull();
+  });
+});

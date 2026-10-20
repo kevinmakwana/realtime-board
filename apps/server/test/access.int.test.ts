@@ -2,7 +2,16 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { keyBetween } from '@board/shared';
 import type { ServerInstance } from '../src/server.js';
-import { collectEvents, createWorld, emit, join, startPair, type TestWorld, waitFor } from './helpers.js';
+import {
+  collectEvents,
+  createWorld,
+  emit,
+  join,
+  startPair,
+  type TestWorld,
+  waitFor,
+  waitUntilBlocked,
+} from './helpers.js';
 
 describe('socket access control across two instances', () => {
   const world: TestWorld = createWorld();
@@ -137,7 +146,7 @@ describe('socket access control across two instances', () => {
     await blocker.query('LOCK TABLE boards IN ACCESS EXCLUSIVE MODE');
     const joining = join(se, snap.board.id);
     try {
-      await new Promise((r) => setTimeout(r, 300));
+      await waitUntilBlocked(world.pool, 1); // the join is stalled on the boards lock
       await world.pool.query('DELETE FROM board_members WHERE board_id = $1 AND user_id = $2', [snap.board.id, ed.id]);
       b.io.serverSideEmit('access:changed', { boardId: snap.board.id, userId: ed.id, role: null });
       await new Promise((r) => setTimeout(r, 300));

@@ -1,6 +1,15 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ServerInstance } from '../src/server.js';
-import { collectEvents, createWorld, emit, join, startPair, type TestWorld, waitFor } from './helpers.js';
+import {
+  collectEvents,
+  createWorld,
+  emit,
+  join,
+  startPair,
+  type TestWorld,
+  waitFor,
+  waitUntilBlocked,
+} from './helpers.js';
 
 describe('board rename and delete', () => {
   const world: TestWorld = createWorld();
@@ -132,6 +141,22 @@ describe('board rename and delete', () => {
       expect((await rest(a.port, ada.token, 'DELETE', `/api/boards/${snap.board.id}`)).status).toBe(404);
     });
 
+    it('refuses a join that is still in flight when the board is deleted, instead of sending an empty snapshot', async () => {
+      const ada = await world.newUser('Ada');
+      const snap = await world.newBoard(ada.id);
+      const sa = await world.connect(a.port, ada.token);
+
+      // Freeze the join at its first Redis write (the presence entry) while the board is deleted under it.
+      await world.redis.call('CLIENT', 'PAUSE', '800', 'WRITE');
+      const joining = join(sa, snap.board.id);
+      await new Promise((r) => setTimeout(r, 250));
+      await world.pool.query('DELETE FROM boards WHERE id = $1', [snap.board.id]);
+
+      expect(await joining).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+      // ...and it left nothing behind on the roster.
+      expect(await world.redis.zcard(`presence:idx:${snap.board.id}`)).toBe(0);
+    });
+
     it('waits for a command that is already running, so nothing is written to a board that is gone', async () => {
       const ada = await world.newUser('Ada');
       const snap = await world.newBoard(ada.id);
@@ -149,9 +174,9 @@ describe('board rename and delete', () => {
           title: 'In flight',
           position: 'a0',
         });
-        await new Promise((r) => setTimeout(r, 250));
+        await waitUntilBlocked(world.pool, 1); // the command is stalled on the cards lock
         deleting = rest(a.port, ada.token, 'DELETE', `/api/boards/${snap.board.id}`);
-        await new Promise((r) => setTimeout(r, 300));
+        await waitUntilBlocked(world.pool, 2); // and the delete is queued behind it on the board lock
         expect(await world.service.latestSeq(snap.board.id)).toBe(0); // still there: the delete is queued behind the command
       } finally {
         await blocker.query('COMMIT');
