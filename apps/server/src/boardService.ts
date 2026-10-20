@@ -100,7 +100,11 @@ export class BoardService {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       const b = await client.query('SELECT id, name, created_at, last_seq FROM boards WHERE id = $1', [boardId]);
       const boardRow = b.rows[0];
-      if (!boardRow) return null;
+      if (!boardRow) {
+        // End the transaction before the connection goes back to the pool, or it is handed out read-only.
+        await client.query('ROLLBACK');
+        return null;
+      }
       // Sequential on purpose: a pg client runs one query at a time.
       const cols = await client.query('SELECT * FROM columns WHERE board_id = $1 ORDER BY position, id', [boardId]);
       const cards = await client.query('SELECT * FROM cards WHERE board_id = $1 ORDER BY position, id', [boardId]);
@@ -184,6 +188,7 @@ export class BoardService {
     boardId: string,
     actorId: string,
     fn: (tx: Tx) => Promise<{ body: EventBody; version?: number } | null>,
+    opts: { ownerOnly?: boolean } = {},
   ): Promise<CommitResult> {
     const client = await this.pool.connect();
     try {
@@ -195,6 +200,7 @@ export class BoardService {
       const role = await roleOf(client, boardId, actorId);
       if (!role) throw new ServiceError('NOT_FOUND', 'Board not found');
       if (!canWrite(role)) throw new ServiceError('FORBIDDEN', 'You have view-only access to this board');
+      if (opts.ownerOnly && role !== 'owner') throw new ServiceError('FORBIDDEN', 'Only the board owner can do that');
 
       const out = await fn(client);
       if (!out) {
@@ -218,6 +224,21 @@ export class BoardService {
     } finally {
       client.release();
     }
+  }
+
+  /** Owner only. Renaming to the current name writes nothing. */
+  async renameBoard(actorId: string, p: ClientEventPayload<'board:rename'>): Promise<CommitResult> {
+    return this.commit(
+      p.boardId,
+      actorId,
+      async (tx) => {
+        const { rows } = await tx.query('SELECT name FROM boards WHERE id = $1', [p.boardId]);
+        if (rows[0]?.name === p.name) return null;
+        await tx.query('UPDATE boards SET name = $2 WHERE id = $1', [p.boardId, p.name]);
+        return { body: { type: 'board.renamed', boardId: p.boardId, actorId, name: p.name } };
+      },
+      { ownerOnly: true },
+    );
   }
 
   async createColumn(actorId: string, p: ClientEventPayload<'column:create'>): Promise<CommitResult> {

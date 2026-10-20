@@ -77,3 +77,12 @@ describe('membership data and enforcement', () => {
     expect(await world.service.latestSeq(snap.board.id)).toBe(1);
   });
 });
+
+describe('reading a board that does not exist', () => {
+  it('gives the connection back clean, however many times it happens', async () => {
+    // The test pool has 4 connections: leaking one per call would exhaust it (or leave it read-only).
+    for (let i = 0; i < 8; i++) expect(await world.service.getSnapshot(randomUUID())).toBeNull();
+    const ada = await world.newUser('Ada'); // a write, on a connection that must not be stuck read-only
+    expect((await world.newBoard(ada.id)).board.id).toBeTruthy();
+  });
+});
