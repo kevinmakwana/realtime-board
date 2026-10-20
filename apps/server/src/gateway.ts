@@ -220,6 +220,8 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
     command('card:move', async (p) => publish(await service.moveCard(user.id, p)));
     command('card:delete', async (p) => publish(await service.deleteCard(user.id, p)));
     command('comment:add', async (p) => publish(await service.addComment(user.id, p)));
+    command('comment:edit', async (p) => publish(await service.editComment(user.id, p)));
+    command('comment:delete', async (p) => publish(await service.deleteComment(user.id, p)));
 
     command('presence:editing', async ({ boardId, cardId }) => {
       await presence.setEditing(boardId, socket.id, cardId);

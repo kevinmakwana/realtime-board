@@ -98,4 +98,11 @@ export const migrations: { id: number; name: string; sql: string }[] = [
       ${BACKFILL_OWNERS_SQL}
     `,
   },
+  {
+    id: 3,
+    name: 'comment edit timestamp',
+    sql: `
+      ALTER TABLE comments ADD COLUMN edited_at timestamptz;
+    `,
+  },
 ];

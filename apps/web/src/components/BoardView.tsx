@@ -231,6 +231,8 @@ export function BoardView({ client, vm, state, session }: Props) {
           client={client}
           editors={editorsByCard.get(openCard.id) ?? []}
           readOnly={readOnly}
+          selfUserId={session.user.id}
+          isOwner={vm.role === 'owner'}
           onClose={() => setOpenCardId(null)}
         />
       )}

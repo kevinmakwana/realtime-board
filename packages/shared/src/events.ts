@@ -27,6 +27,8 @@ export const boardEventSchema = z.discriminatedUnion('type', [
   z.object({ ...eventBase, type: z.literal('card.moved'), card: cardSchema }),
   z.object({ ...eventBase, type: z.literal('card.deleted'), cardId: idSchema }),
   z.object({ ...eventBase, type: z.literal('comment.added'), comment: commentSchema }),
+  z.object({ ...eventBase, type: z.literal('comment.updated'), comment: commentSchema }),
+  z.object({ ...eventBase, type: z.literal('comment.deleted'), commentId: idSchema }),
 ]);
 export type BoardEvent = z.infer<typeof boardEventSchema>;
 export type BoardEventType = BoardEvent['type'];
@@ -102,6 +104,15 @@ export const commentAddPayload = z.object({
   body: z.string().trim().min(1).max(LIMITS.commentBody),
 });
 
+/** Author only; the server answers with a `comment.updated` event. */
+export const commentEditPayload = z.object({
+  id: idSchema,
+  boardId: idSchema,
+  body: z.string().trim().min(1).max(LIMITS.commentBody),
+});
+/** The author, or the board owner moderating. */
+export const commentDeletePayload = z.object({ id: idSchema, boardId: idSchema });
+
 export const cursorPayload = z.object({
   boardId: idSchema,
   /** Normalised 0..1 coordinates inside the board canvas. */
@@ -127,6 +138,8 @@ export const clientEventSchemas = {
   'card:move': cardMovePayload,
   'card:delete': cardDeletePayload,
   'comment:add': commentAddPayload,
+  'comment:edit': commentEditPayload,
+  'comment:delete': commentDeletePayload,
   'presence:cursor': cursorPayload,
   'presence:editing': editingPayload,
 } as const;
@@ -216,6 +229,8 @@ export interface ClientToServerEvents {
   'card:move': (p: ClientEventPayload<'card:move'>, ack: AckFn) => void;
   'card:delete': (p: ClientEventPayload<'card:delete'>, ack: AckFn) => void;
   'comment:add': (p: ClientEventPayload<'comment:add'>, ack: AckFn) => void;
+  'comment:edit': (p: ClientEventPayload<'comment:edit'>, ack: AckFn) => void;
+  'comment:delete': (p: ClientEventPayload<'comment:delete'>, ack: AckFn) => void;
   'presence:cursor': (p: ClientEventPayload<'presence:cursor'>) => void;
   'presence:editing': (p: ClientEventPayload<'presence:editing'>, ack?: AckFn) => void;
 }

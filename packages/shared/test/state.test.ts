@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyEvent, applyEvents, applyPending, selectCards, selectColumns, stateFromSnapshot } from '../src/index.js';
-import { board, card, column, ev, ids } from './fixtures.js';
+import { board, card, column, comment, ev, ids } from './fixtures.js';
 
 const base = () =>
   stateFromSnapshot({
@@ -46,6 +46,7 @@ describe('applyEvent', () => {
           authorName: 'Ada',
           body: 'hi',
           createdAt: 'x',
+          editedAt: null,
         },
       }),
     );
@@ -127,5 +128,40 @@ describe('board rename', () => {
     const view = applyPending(s, [{ kind: 'board.rename', name: 'Draft name' }]);
     expect(view.board.name).toBe('Draft name');
     expect(s.board.name).toBe('Roadmap');
+  });
+});
+
+describe('comment edits and deletes', () => {
+  const withComment = () =>
+    applyEvent(base(), ev(5, 'comment.added', { comment: comment(ids.card3, ids.card1, { body: 'first draft' }) }));
+
+  it('replaces the comment when it is updated', () => {
+    const edited = comment(ids.card3, ids.card1, { body: 'better', editedAt: '2026-01-02T00:00:00.000Z' });
+    const s = applyEvent(withComment(), ev(6, 'comment.updated', { comment: edited }));
+    expect(s.comments[ids.card3]?.body).toBe('better');
+    expect(s.comments[ids.card3]?.editedAt).toBe('2026-01-02T00:00:00.000Z');
+    expect(s.seq).toBe(6);
+  });
+
+  it('removes the comment when it is deleted, and tolerates a repeat', () => {
+    const s = applyEvent(withComment(), ev(6, 'comment.deleted', { commentId: ids.card3 }));
+    expect(Object.keys(s.comments)).toEqual([]);
+    expect(applyEvent(s, ev(6, 'comment.deleted', { commentId: ids.card3 }))).toBe(s); // replay: same seq
+    expect(Object.keys(applyEvent(s, ev(7, 'comment.deleted', { commentId: ids.card3 })).comments)).toEqual([]);
+  });
+
+  it('shows pending edits and deletes in the view only', () => {
+    const s = withComment();
+    const edited = applyPending(s, [{ kind: 'comment.edit', id: ids.card3, body: 'typo fixed' }]);
+    expect(edited.comments[ids.card3]?.body).toBe('typo fixed');
+    expect(s.comments[ids.card3]?.body).toBe('first draft');
+    const deleted = applyPending(s, [{ kind: 'comment.delete', id: ids.card3 }]);
+    expect(Object.keys(deleted.comments)).toEqual([]);
+    expect(Object.keys(s.comments)).toEqual([ids.card3]);
+  });
+
+  it('ignores a pending edit of a comment that is already gone', () => {
+    const view = applyPending(base(), [{ kind: 'comment.edit', id: ids.card3, body: 'x' }]);
+    expect(Object.keys(view.comments)).toEqual([]);
   });
 });

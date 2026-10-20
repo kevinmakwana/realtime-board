@@ -124,6 +124,8 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 | `card:move` | `{ id, boardId, baseVersion, columnId, position }` | `{ seq, version }` | Same version check. `position` is a fractional key. |
 | `card:delete` | `{ id, boardId, baseVersion }` | `{ seq }` | Same version check. |
 | `comment:add` | `{ id, boardId, cardId, body }` | `{ seq }` | |
+| `comment:edit` | `{ id, boardId, body }` | `{ seq }` | Author only (`FORBIDDEN` otherwise, even for the board owner). Saving the same text writes nothing. |
+| `comment:delete` | `{ id, boardId }` | `{ seq }` | The author, or the board owner moderating. |
 | `presence:editing` | `{ boardId, cardId \| null }` | `{}` | Stored in Redis with the member record. |
 | `presence:cursor` | `{ boardId, x, y }` (0 to 1) | none | Fire and forget, volatile, rate limited separately. |
 
@@ -136,7 +138,7 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 | `presence:cursor` | `{ socketId, userId, boardId, x, y }` | Not sent back to the sender. |
 | `board:access` | `{ boardId, role }` | Your role changed; `role` is `null` when you were removed from the board (the server also takes you out of its room). |
 
-`board:event` types: `board.renamed`, `column.created`, `column.updated`, `column.deleted`, `card.created`, `card.updated`, `card.moved`, `card.deleted`, `comment.added`. Card events carry the full card, so applying them is idempotent.
+`board:event` types: `board.renamed`, `column.created`, `column.updated`, `column.deleted`, `card.created`, `card.updated`, `card.moved`, `card.deleted`, `comment.added`, `comment.updated`, `comment.deleted`. Card events carry the full card, so applying them is idempotent.
 
 ### Acks and errors
 

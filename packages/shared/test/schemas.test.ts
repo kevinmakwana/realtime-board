@@ -7,7 +7,7 @@ import {
   clientEventSchemas,
   setRoleBody,
 } from '../src/index.js';
-import { card, ev, ids } from './fixtures.js';
+import { card, comment, ev, ids } from './fixtures.js';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 
@@ -144,5 +144,30 @@ describe('board:rename', () => {
     const e = ev(3, 'board.renamed', { name: 'New name' });
     expect(boardEventSchema.safeParse(e).success).toBe(true);
     expect(boardEventSchema.safeParse({ ...e, name: undefined }).success).toBe(false);
+  });
+});
+
+describe('comment:edit and comment:delete', () => {
+  it('edit needs a non-blank body within the limit, trimmed', () => {
+    const edit = clientEventSchemas['comment:edit'];
+    const r = edit.safeParse({ id: uuid, boardId: ids.board, body: '  fixed  ' });
+    expect(r.success && r.data.body).toBe('fixed');
+    expect(edit.safeParse({ id: uuid, boardId: ids.board, body: '   ' }).success).toBe(false);
+    expect(edit.safeParse({ id: uuid, boardId: ids.board, body: 'x'.repeat(2001) }).success).toBe(false);
+    expect(edit.safeParse({ id: uuid, boardId: ids.board, body: 'x'.repeat(2000) }).success).toBe(true);
+  });
+
+  it('delete needs only ids', () => {
+    expect(clientEventSchemas['comment:delete'].safeParse({ id: uuid, boardId: ids.board }).success).toBe(true);
+    expect(clientEventSchemas['comment:delete'].safeParse({ id: 'nope', boardId: ids.board }).success).toBe(false);
+  });
+
+  it('knows the comment.updated and comment.deleted events', () => {
+    const updated = ev(4, 'comment.updated', { comment: comment(uuid, ids.card1, { editedAt: 'x' }) });
+    expect(boardEventSchema.safeParse(updated).success).toBe(true);
+    expect(boardEventSchema.safeParse(ev(5, 'comment.deleted', { commentId: uuid })).success).toBe(true);
+    expect(
+      boardEventSchema.safeParse({ ...ev(5, 'comment.deleted', { commentId: uuid }), commentId: 'x' }).success,
+    ).toBe(false);
   });
 });

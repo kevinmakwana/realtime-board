@@ -81,6 +81,8 @@ export const commentSchema = z.object({
   authorName: z.string(),
   body: z.string(),
   createdAt: z.string(),
+  /** Set when the author edits the comment. Entries logged before editing existed lack it (read as null). */
+  editedAt: z.string().nullable(),
 });
 export type Comment = z.infer<typeof commentSchema>;
 

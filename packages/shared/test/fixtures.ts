@@ -1,4 +1,4 @@
-import type { Board, BoardEvent, Card, Column } from '../src/index.js';
+import type { Board, BoardEvent, Card, Column, Comment } from '../src/index.js';
 
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const ids = {
@@ -27,6 +27,18 @@ export const card = (id: string, columnId: string, position: string, extra: Part
   position,
   version: 1,
   updatedAt: '2026-01-01T00:00:00.000Z',
+  ...extra,
+});
+
+export const comment = (id: string, cardId: string, extra: Partial<Comment> = {}): Comment => ({
+  id,
+  boardId: ids.board,
+  cardId,
+  authorId: ids.user,
+  authorName: 'Ada',
+  body: 'hello',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  editedAt: null,
   ...extra,
 });
 

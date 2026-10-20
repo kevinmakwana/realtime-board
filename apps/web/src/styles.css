@@ -676,3 +676,23 @@ textarea {
   color: var(--ink-soft);
   font-size: 13px;
 }
+
+/* ---------- comment edit / delete ---------- */
+.comments .edited {
+  margin-left: 6px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+.comment-actions {
+  display: inline-flex;
+  gap: 10px;
+  font-size: 12px;
+}
+.comment-edit {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+.comment-edit textarea {
+  width: 100%;
+}

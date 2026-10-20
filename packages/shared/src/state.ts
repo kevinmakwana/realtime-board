@@ -65,8 +65,14 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
       break;
     }
     case 'comment.added':
+    case 'comment.updated':
       next.comments = { ...state.comments, [e.comment.id]: e.comment };
       break;
+    case 'comment.deleted': {
+      const { [e.commentId]: _removed, ...comments } = state.comments;
+      next.comments = comments;
+      break;
+    }
   }
   return next;
 }
@@ -90,7 +96,9 @@ export type PendingOp =
   | { kind: 'card.update'; id: string; title?: string; description?: string }
   | { kind: 'card.move'; id: string; columnId: string; position: string }
   | { kind: 'card.delete'; id: string }
-  | { kind: 'comment.add'; comment: Comment };
+  | { kind: 'comment.add'; comment: Comment }
+  | { kind: 'comment.edit'; id: string; body: string }
+  | { kind: 'comment.delete'; id: string };
 
 /** Project pending local ops on top of the authoritative state to get the view state. */
 export function applyPending(state: BoardState, ops: readonly PendingOp[]): BoardState {
@@ -157,6 +165,16 @@ export function applyPending(state: BoardState, ops: readonly PendingOp[]): Boar
       case 'comment.add':
         s = { ...s, comments: { ...s.comments, [op.comment.id]: op.comment } };
         break;
+      case 'comment.edit': {
+        const c = s.comments[op.id];
+        if (c) s = { ...s, comments: { ...s.comments, [op.id]: { ...c, body: op.body } } };
+        break;
+      }
+      case 'comment.delete': {
+        const { [op.id]: _gone, ...comments } = s.comments;
+        s = { ...s, comments };
+        break;
+      }
     }
   }
   return s;
