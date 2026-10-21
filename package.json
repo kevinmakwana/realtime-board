@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.22.2"
   },
   "workspaces": [
     "packages/*",
@@ -21,7 +21,7 @@
     "format": "biome format --write .",
     "audit:prod": "npm audit --omit=dev --audit-level=high",
     "test": "npm run test:unit && npm run test:integration",
-    "test:unit": "vitest run --project unit",
+    "test:unit": "vitest run --project unit --project components",
     "test:integration": "vitest run --project integration",
     "test:e2e": "playwright test",
     "infra:up": "docker compose up -d --wait postgres redis",

@@ -1,3 +1,4 @@
+import react from '@vitejs/plugin-react';
 import { defaultExclude, defineConfig } from 'vitest/config';
 
 const integration = '**/*.int.test.ts';
@@ -11,6 +12,16 @@ export default defineConfig({
           include: ['{apps,packages}/**/*.test.ts'],
           exclude: [integration, '**/node_modules/**', ...defaultExclude],
         },
+      },
+      {
+        // React components: rendered into jsdom and driven the way a person would.
+        test: {
+          name: 'components',
+          environment: 'jsdom',
+          include: ['apps/web/test/**/*.test.tsx'],
+          setupFiles: ['apps/web/test/setup.ts'],
+        },
+        plugins: [react()],
       },
       {
         test: {
