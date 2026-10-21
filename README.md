@@ -91,8 +91,8 @@ Host ports are configurable: `POSTGRES_PORT`, `REDIS_PORT`, `NGINX_PORT` (see [`
 ```bash
 npm run lint                 # Biome: lint + format check (npm run lint:fix to fix, npm run format to format)
 npm run typecheck
-npm run test:unit            # schemas, ordering, reducer, sequence buffer, client engine, rate limiter
-npm run test:integration     # needs `npm run infra:up`; starts TWO server instances on one Redis
+npm run test:unit            # schemas, ordering, reducer, client engine, rate limiter, and the React components (jsdom + Testing Library)
+npm run test:integration     # needs `npm run infra:up`; starts TWO server instances on one Redis; includes a route-by-route REST suite
 npx playwright install chromium
 npm run test:e2e             # two browser contexts on two instances edit the same board
 npm run demo:gif             # re-record docs/demo.gif against the scale profile
