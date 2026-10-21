@@ -109,6 +109,18 @@ describe('REST routes', () => {
       expect(res.json).toHaveProperty('error');
     });
 
+    it('answers an unsupported charset or encoding with 415, not 500', async () => {
+      const { token } = await world.newUser();
+      const post = (headers: Record<string, string>) =>
+        fetch(`${base}/api/boards`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}`, ...headers },
+          body: JSON.stringify({ name: 'x' }),
+        });
+      expect((await post({ 'content-type': 'application/json; charset=foo' })).status).toBe(415);
+      expect((await post({ 'content-type': 'application/json', 'content-encoding': 'zstdx' })).status).toBe(415);
+    });
+
     it('validates the catch-up cursor and the activity limit', async () => {
       const { id, token } = await world.newUser();
       const snap = await world.newBoard(id);

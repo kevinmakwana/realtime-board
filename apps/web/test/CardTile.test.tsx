@@ -80,7 +80,7 @@ describe('CardTile', () => {
     expect(onOpen).toHaveBeenCalledTimes(3);
   });
 
-  it('is draggable for editors and not for viewers', () => {
+  it('is draggable for editors', () => {
     setup();
     expect(screen.getByTestId('card')).toHaveAttribute('draggable', 'true');
   });

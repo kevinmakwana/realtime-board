@@ -221,12 +221,17 @@ export function createApp({ config, pool, redis, service, membership, mailer, me
       return void res.status(status[err.code] ?? 500).json({ error: err.message });
     }
     if (err instanceof z.ZodError) return void res.status(400).json({ error: z.prettifyError(err) });
-    // The JSON body parser reports bad input (invalid JSON, too large, wrong charset) as a 4xx error of its own.
-    const parseError = err as { type?: unknown; status?: unknown };
-    if (typeof parseError.type === 'string' && parseError.type.startsWith('entity.')) {
-      const status = typeof parseError.status === 'number' && parseError.status >= 400 ? parseError.status : 400;
-      const error = status === 413 ? 'Request body too large' : 'Invalid request body';
-      return void res.status(status).json({ error });
+    // The body parser reports bad input (invalid JSON, too large, unsupported charset or encoding, aborted upload)
+    // as http-errors with a 4xx status and `expose` set. Answer that status, with a generic message of our own.
+    const httpError = err as { status?: unknown; expose?: unknown };
+    if (
+      httpError.expose === true &&
+      typeof httpError.status === 'number' &&
+      httpError.status >= 400 &&
+      httpError.status < 500
+    ) {
+      const error = httpError.status === 413 ? 'Request body too large' : 'Invalid request body';
+      return void res.status(httpError.status).json({ error });
     }
     log('unhandled error', { level: 'error', error: err instanceof Error ? (err.stack ?? err.message) : String(err) });
     res.status(500).json({ error: 'Internal error' });

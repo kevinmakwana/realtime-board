@@ -54,7 +54,7 @@
 - [x] ~~**Frontend component tests and REST route tests**~~ (2026-10-21)
   - React Testing Library + jsdom as a `components` vitest project (run by `test:unit`): 50 tests over BoardView (search, activity, roles, card deleted while open), CardModal, Column and CardTile, driven with a spy client. `apps/web/test` is now typechecked
   - `routes.int.test.ts` (24 tests): every protected route needs a token, malformed ids, name/cursor/limit validation, stranger 404s, unknown routes, dev-login off, sign-in validation
-  - Found and fixed: malformed JSON and oversized bodies answered 500 (and logged an error); now 400 and 413
+  - Found and fixed: malformed JSON, oversized bodies and unsupported charsets/encodings answered 500 (and logged an error); now 400, 413 and 415
 - [ ] **Touch and keyboard drag and drop, ARIA pass** - HTML5 DnD in Column.tsx does not work on touch or keyboard
   - Priority 21 (I4 R3 E3)
 - [ ] **Offline command queue** - real queue and replay, if wanted after the copy fix

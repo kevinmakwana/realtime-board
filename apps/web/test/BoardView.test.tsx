@@ -36,6 +36,7 @@ function setup(opts: { role?: Role | null; status?: BoardViewModel['status'] } =
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.mocked(api.listMembers).mockResolvedValue({ members: [ada, grace] });
   vi.mocked(api.activity).mockResolvedValue({
     entries: [
@@ -62,9 +63,12 @@ describe('BoardView', () => {
     expect(screen.getByTestId('connection')).toHaveTextContent('Live on a');
   });
 
-  it('says when it is reconnecting or signed out', () => {
-    setup({ status: 'reconnecting' });
-    expect(screen.getByTestId('connection')).toHaveTextContent('Reconnecting…');
+  it.each([
+    ['reconnecting', 'Reconnecting…'],
+    ['unauthorized', 'Signed out'],
+  ] as const)('says so when the connection is %s', (status, text) => {
+    setup({ status });
+    expect(screen.getByTestId('connection')).toHaveTextContent(text);
   });
 
   describe('search', () => {
@@ -87,7 +91,6 @@ describe('BoardView', () => {
       expect(cardTitles()).toEqual(['Design onboarding']);
 
       await user.clear(search);
-      await waitFor(() => expect(api.listMembers).toHaveBeenCalled());
       await user.type(search, 'grace'); // an assignee, by name
       await waitFor(() => expect(cardTitles()).toEqual(['Write release notes']));
 
