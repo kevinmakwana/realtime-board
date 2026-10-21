@@ -14,16 +14,33 @@ import {
   type Comment,
   type NewBoardEvent,
   type Role,
+  type ActivityEntry,
   canWrite,
+  describeActivity,
 } from '@board/shared';
 import type { Pool } from './db.js';
 import { ServiceError } from './errors.js';
 import { roleOf } from './roles.js';
 
+/** How far back `activity()` reads so deleted things can still be named. */
+const ACTIVITY_LOOKBACK = 500;
+
 /* ---------- row mappers ---------- */
 
 type Row = Record<string, unknown>;
 const iso = (v: unknown): string => (v instanceof Date ? v.toISOString() : String(v));
+
+const rowToEvent =
+  (boardId: string) =>
+  (r: Row): BoardEvent =>
+    ({
+      ...(r.payload as object),
+      seq: r.seq as number,
+      type: r.type as BoardEvent['type'],
+      boardId,
+      actorId: r.actor_id as string,
+      ts: iso(r.created_at),
+    }) as BoardEvent;
 
 const toBoard = (r: Row): Board => ({ id: r.id as string, name: r.name as string, createdAt: iso(r.created_at) });
 const toColumn = (r: Row): Column => ({
@@ -140,17 +157,34 @@ export class BoardService {
        WHERE board_id = $1 AND seq > $2 ORDER BY seq LIMIT $3`,
       [boardId, after, limit],
     );
-    return rows.map(
-      (r) =>
-        ({
-          ...(r.payload as object),
-          seq: r.seq as number,
-          type: r.type as BoardEvent['type'],
-          boardId,
-          actorId: r.actor_id as string,
-          ts: iso(r.created_at),
-        }) as BoardEvent,
+    return rows.map(rowToEvent(boardId));
+  }
+
+  /**
+   * The latest `limit` things that happened, newest first, as readable lines. Looks back further than `limit`
+   * so that "deleted a card" can still name the card.
+   */
+  async activity(boardId: string, limit: number): Promise<ActivityEntry[]> {
+    const { rows } = await this.pool.query(
+      `SELECT seq, type, payload, actor_id, created_at FROM board_events
+       WHERE board_id = $1 ORDER BY seq DESC LIMIT $2`,
+      [boardId, Math.max(limit, ACTIVITY_LOOKBACK)],
     );
+    if (rows.length === 0) return [];
+    const events = rows.reverse().map(rowToEvent(boardId));
+    const actors = [...new Set(events.map((e) => e.actorId))];
+    const users = await this.pool.query('SELECT id, name FROM users WHERE id = ANY($1::uuid[])', [actors]);
+    const names = new Map<string, string>(users.rows.map((u) => [u.id as string, u.name as string]));
+    const cols = await this.pool.query('SELECT id, name, position FROM columns WHERE board_id = $1', [boardId]);
+    const from = events[Math.max(0, events.length - limit)]!.seq;
+    return describeActivity(events, (id) => names.get(id), {
+      from,
+      knownColumns: cols.rows.map((c) => ({
+        id: c.id as string,
+        name: c.name as string,
+        position: c.position as string,
+      })),
+    }).reverse();
   }
 
   /* ---------------- boards (REST, no events: nobody is subscribed yet) ---------------- */

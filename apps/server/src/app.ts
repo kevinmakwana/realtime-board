@@ -162,6 +162,13 @@ export function createApp({ config, pool, redis, service, membership, mailer, me
     res.json({ events: await service.eventsSince(id, after, 500) });
   });
 
+  api.get('/boards/:id/activity', async (req: AuthedRequest, res) => {
+    const id = z.uuid().parse(req.params.id);
+    await mustBeMember(id, req.userId!);
+    const limit = z.coerce.number().int().min(1).default(50).parse(req.query.limit);
+    res.json({ entries: await service.activity(id, Math.min(limit, 200)) });
+  });
+
   api.delete('/boards/:id', async (req: AuthedRequest, res) => {
     const id = z.uuid().parse(req.params.id);
     await membership.deleteBoard(id, req.userId!);

@@ -165,6 +165,7 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 | `GET /api/boards`, `POST /api/boards` | List your boards (each with your `role`) or create one (new boards get To do, In progress, Done; the creator is the owner). |
 | `GET /api/boards/:id` | Snapshot with its `seq`. Members only; anyone else gets `404`. |
 | `GET /api/boards/:id/events?after=N` | Event log slice. Members only. |
+| `GET /api/boards/:id/activity?limit=50` | The latest changes as readable lines (`{ entries: [{ seq, ts, actorName, text }] }`), newest first. Members only, viewers included. `limit` is clamped to 200. Built from the event log by `describeActivity` in `packages/shared`. |
 | `GET /api/boards/:id/members` | Members with names, colours and roles. The owner also gets emails and pending invites. |
 | `POST /api/boards/:id/members` | Owner only. `{ email, role: 'editor' \| 'viewer' }`. An existing user is added at once, anyone else gets a pending invite. |
 | `PATCH /api/boards/:id/members/:userId` | Owner only. `{ role }`. The owner's own role cannot change. |
