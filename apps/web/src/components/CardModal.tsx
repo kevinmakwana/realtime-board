@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { LIMITS, selectComments, type BoardState, type Card, type Member } from '@board/shared';
+import {
+  LIMITS,
+  selectCards,
+  selectColumns,
+  selectComments,
+  type BoardState,
+  type Card,
+  type Member,
+} from '@board/shared';
 import type { BoardClient } from '../lib/boardClient';
 import { labelHue } from '../lib/cardMeta';
+import { useDialogFocus } from '../lib/useDialogFocus';
 import { CommentItem } from './CommentItem';
 
 interface Props {
@@ -34,6 +43,10 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
     (card.title !== baseline.current.title || card.description !== baseline.current.description);
   const comments = selectComments(state, card.id);
   const column = state.columns[card.columnId];
+  const dialogRef = useDialogFocus<HTMLDivElement>();
+  const columns = selectColumns(state);
+  const siblings = selectCards(state, card.columnId);
+  const place = siblings.findIndex((c) => c.id === card.id);
 
   useEffect(() => () => client.setEditing(null), [client]);
 
@@ -73,7 +86,7 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is a mouse shortcut; keyboard users close with Escape (BoardView)
     <div className="scrim" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label="Card details">
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Card details" tabIndex={-1} ref={dialogRef}>
         <header className="modal-head">
           <span className="in-column">in {column?.name ?? 'column'}</span>
           <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
@@ -134,6 +147,32 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
             }
           />
         </label>
+
+        {!readOnly && (
+          <fieldset className="field-row move-card">
+            <legend>Move this card</legend>
+            <label className="field">
+              Column
+              <select value={card.columnId} onChange={(e) => client.moveCard(card.id, e.target.value, 0)}>
+                {columns.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              Position
+              <select value={place} onChange={(e) => client.moveCard(card.id, card.columnId, Number(e.target.value))}>
+                {siblings.map((c, i) => (
+                  <option key={c.id} value={i}>
+                    {i + 1} of {siblings.length}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </fieldset>
+        )}
 
         <div className="field-row">
           <label className="field">

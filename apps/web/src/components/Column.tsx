@@ -8,6 +8,7 @@ import {
   type Member,
 } from '@board/shared';
 import type { BoardClient } from '../lib/boardClient';
+import { columnMoveTarget, type Direction } from '../lib/moves';
 import { CardTile } from './CardTile';
 
 interface Props {
@@ -21,6 +22,9 @@ interface Props {
   /** While searching: shows only matching cards (and stops card dragging, whose drop positions assume all are shown). */
   filter: ((card: Card) => boolean) | null;
   onOpenCard: (id: string) => void;
+  /** Keyboard moves (Alt+arrows on a card, the arrow buttons on a column header). */
+  onMoveCard: (cardId: string, dir: Direction) => void;
+  onMoveColumn: (columnId: string, dir: 'left' | 'right') => void;
   readOnly: boolean;
   /** Where a column being dragged would land relative to this one, for the drop marker. */
   dropMarker: 'before' | 'after' | null;
@@ -37,6 +41,8 @@ export function Column({
   members,
   filter,
   onOpenCard,
+  onMoveCard,
+  onMoveColumn,
   readOnly,
   dropMarker,
   setDraggingColumnId,
@@ -86,7 +92,7 @@ export function Column({
       data-testid={`column-${column.name}`}
       data-column-id={column.id}
     >
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse drag-and-drop of columns; keyboard and touch reordering is tracked in TASKS.md (Phase 4) */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse drag-and-drop of columns; the arrow buttons below reorder columns from the keyboard and by touch */}
       <header
         className="lane-head"
         draggable={!readOnly && !renaming}
@@ -117,16 +123,23 @@ export function Column({
             />
           </form>
         ) : (
-          // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard rename is tracked in TASKS.md (Phase 4, touch/keyboard + ARIA pass)
-          <h2
-            title={readOnly ? undefined : 'Click to rename'}
-            onClick={() => {
-              if (readOnly) return;
-              setName(column.name);
-              setRenaming(true);
-            }}
-          >
-            {column.name}
+          <h2>
+            {readOnly ? (
+              column.name
+            ) : (
+              <button
+                type="button"
+                className="title-btn"
+                title="Rename column"
+                aria-label={`Rename column ${column.name}`}
+                onClick={() => {
+                  setName(column.name);
+                  setRenaming(true);
+                }}
+              >
+                {column.name}
+              </button>
+            )}
           </h2>
         )}
         <span
@@ -136,6 +149,21 @@ export function Column({
         >
           {filter ? `${cards.length}/${allCards.length}` : cards.length}
         </span>
+        {!readOnly &&
+          (['left', 'right'] as const).map((dir) => (
+            <button
+              key={dir}
+              type="button"
+              className="icon-btn move-col"
+              data-move-col={dir}
+              aria-label={`Move column ${column.name} ${dir}`}
+              title={`Move ${dir}`}
+              disabled={!columnMoveTarget(state, column.id, dir)}
+              onClick={() => onMoveColumn(column.id, dir)}
+            >
+              {dir === 'left' ? '‹' : '›'}
+            </button>
+          ))}
         {!readOnly && (
           <button
             type="button"
@@ -178,6 +206,7 @@ export function Column({
                   editors={editorsByCard.get(card.id) ?? []}
                   members={members}
                   onOpen={() => onOpenCard(card.id)}
+                  onMove={(dir) => onMoveCard(card.id, dir)}
                   onDragStart={() => requestAnimationFrame(() => setDraggingId(card.id))}
                   onDragEnd={() => {
                     setDraggingId(null);

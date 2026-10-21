@@ -10,6 +10,8 @@ function setup(opts: { cards?: Card[]; readOnly?: boolean; filter?: ((c: Card) =
   const state = makeState(cards, cards[0] ? [makeComment(1, cards[0].id)] : []);
   const client = fakeClient();
   const onOpenCard = vi.fn();
+  const onMoveCard = vi.fn();
+  const onMoveColumn = vi.fn();
   render(
     <Column
       column={state.columns[COL_TODO]!}
@@ -21,12 +23,14 @@ function setup(opts: { cards?: Card[]; readOnly?: boolean; filter?: ((c: Card) =
       members={new Map()}
       filter={opts.filter ?? null}
       onOpenCard={onOpenCard}
+      onMoveCard={onMoveCard}
+      onMoveColumn={onMoveColumn}
       readOnly={opts.readOnly ?? false}
       dropMarker={null}
       setDraggingColumnId={vi.fn()}
     />,
   );
-  return { client, onOpenCard };
+  return { client, onOpenCard, onMoveCard, onMoveColumn };
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -76,13 +80,13 @@ describe('Column', () => {
   it('renames the column from its heading, and Escape cancels', async () => {
     const user = userEvent.setup();
     const { client } = setup();
-    await user.click(screen.getByRole('heading', { name: 'To do' }));
+    await user.click(screen.getByRole('button', { name: 'Rename column To do' }));
     const input = screen.getByRole('textbox', { name: 'Column name' });
     await user.clear(input);
     await user.type(input, 'Backlog{Enter}');
     expect(client.renameColumn).toHaveBeenCalledWith(COL_TODO, 'Backlog');
 
-    await user.click(screen.getByRole('heading', { name: 'To do' }));
+    await user.click(screen.getByRole('button', { name: 'Rename column To do' }));
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('textbox', { name: 'Column name' })).not.toBeInTheDocument();
     expect(client.renameColumn).toHaveBeenCalledTimes(1);
@@ -114,11 +118,39 @@ describe('Column', () => {
     expect(confirm).toHaveBeenCalledWith('Delete "To do" and its 2 card(s)?');
   });
 
+  it('renames from the keyboard: the name is a button', async () => {
+    const user = userEvent.setup();
+    const { client } = setup();
+    await user.tab(); // first stop in the header is the name
+    expect(screen.getByRole('button', { name: 'Rename column To do' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    await user.keyboard('{Control>}a{/Control}Backlog{Enter}');
+    expect(client.renameColumn).toHaveBeenCalledWith(COL_TODO, 'Backlog');
+  });
+
+  it('has buttons to move the column, disabled at the ends of the board', async () => {
+    const user = userEvent.setup();
+    const { onMoveColumn } = setup(); // "To do" is the first of two columns
+    expect(screen.getByRole('button', { name: 'Move column To do left' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Move column To do right' }));
+    expect(onMoveColumn).toHaveBeenCalledWith(COL_TODO, 'right');
+  });
+
+  it('passes a card’s keyboard move up with the card’s id', async () => {
+    const user = userEvent.setup();
+    const { onMoveCard } = setup();
+    screen.getAllByTestId('card')[1]?.focus();
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}');
+    expect(onMoveCard).toHaveBeenCalledWith(makeCard(2).id, 'up');
+  });
+
   it('gives a viewer the cards without any way to change the column', () => {
     setup({ readOnly: true });
     expect(screen.getAllByTestId('card')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: '+ Add card' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Delete column/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'To do' })).not.toHaveAttribute('title');
+    expect(screen.getByRole('heading', { name: 'To do' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rename column To do' })).not.toBeInTheDocument(); // the name is not a rename button
+    expect(screen.queryByRole('button', { name: /Move column/ })).not.toBeInTheDocument();
   });
 });

@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { selectColumns, type BoardState, type Card, type Member } from '@board/shared';
 import { api, type Session } from '../api';
 import type { BoardClient, BoardViewModel } from '../lib/boardClient';
+import { cardMoveTarget, columnMoveTarget, type Direction } from '../lib/moves';
 import { cardMatches, parseQuery } from '../lib/search';
 import { navigate } from '../router';
 import { ActivityPanel } from './ActivityPanel';
 import { CardModal } from './CardModal';
+import { MOVE_HELP_ID } from './CardTile';
 import { Column } from './Column';
 import { ShareDialog } from './ShareDialog';
 import { Cursors } from './Cursors';
@@ -37,6 +39,40 @@ export function BoardView({ client, vm, state, session }: Props) {
   const [columnDropIndex, setColumnDropIndex] = useState<number | null>(null);
   const [addingColumn, setAddingColumn] = useState(false);
   const [columnName, setColumnName] = useState('');
+  // Keyboard moves are announced to screen readers, and focus is put back on whatever was moved.
+  const [announcement, setAnnouncement] = useState('');
+  // Selectors to try, in order, once the move has been drawn.
+  const [refocus, setRefocus] = useState<string[] | null>(null);
+
+  function moveCardBy(cardId: string, dir: Direction) {
+    const target = cardMoveTarget(state, cardId, dir);
+    if (!target) return;
+    client.moveCard(cardId, target.columnId, target.index);
+    setAnnouncement(target.message);
+    setRefocus([`[data-card-id="${cardId}"]`]);
+  }
+
+  function moveColumnBy(columnId: string, dir: 'left' | 'right') {
+    const target = columnMoveTarget(state, columnId, dir);
+    if (!target) return;
+    client.moveColumn(columnId, target.index);
+    setAnnouncement(target.message);
+    // Moving an element in the DOM drops its focus; the button may also have just become disabled (end of the row).
+    const button = (d: string) => `[data-column-id="${columnId}"] [data-move-col="${d}"]:not(:disabled)`;
+    setRefocus([button(dir), button(dir === 'left' ? 'right' : 'left')]);
+  }
+
+  useEffect(() => {
+    if (!refocus) return;
+    for (const selector of refocus) {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el) {
+        el.focus();
+        break;
+      }
+    }
+    setRefocus(null);
+  }, [refocus, state]);
 
   // Cursor position is normalised to the lanes element so it lines up across different window sizes.
   const onPointerMove = useCallback(
@@ -208,6 +244,12 @@ export function BoardView({ client, vm, state, session }: Props) {
         </span>
       </header>
 
+      <p id={MOVE_HELP_ID} className="sr-only">
+        Press Alt with the arrow keys to move this card. Enter opens it.
+      </p>
+      <p className="sr-only" role="status" aria-live="polite" data-testid="move-announcement">
+        {announcement}
+      </p>
       <main className="canvas" onPointerMove={onPointerMove}>
         {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse drag-and-drop of columns; keyboard and touch reordering is tracked in TASKS.md (Phase 4) */}
         <div
@@ -239,6 +281,8 @@ export function BoardView({ client, vm, state, session }: Props) {
               members={members}
               filter={filter}
               onOpenCard={setOpenCardId}
+              onMoveCard={moveCardBy}
+              onMoveColumn={moveColumnBy}
               readOnly={readOnly}
               setDraggingColumnId={(id) => (id ? setDraggingColumnId(id) : finishColumnDrag())}
               dropMarker={

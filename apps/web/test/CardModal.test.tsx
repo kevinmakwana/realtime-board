@@ -3,7 +3,18 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Card, Comment, Member } from '@board/shared';
 import { CardModal } from '../src/components/CardModal';
-import { ada, ADA, fakeClient, grace, GRACE, makeCard, makeComment, makeState } from './componentHelpers';
+import {
+  ada,
+  ADA,
+  COL_DONE,
+  COL_TODO,
+  fakeClient,
+  grace,
+  GRACE,
+  makeCard,
+  makeComment,
+  makeState,
+} from './componentHelpers';
 
 interface Opts {
   card?: Card;
@@ -95,6 +106,53 @@ describe('CardModal', () => {
     it('lists who else is editing', () => {
       setup({ editors: [{ name: 'Grace Hopper', color: '#e5484d' }] });
       expect(screen.getByRole('status')).toHaveTextContent('Grace Hopper is editing this card too');
+    });
+  });
+
+  describe('moving without dragging', () => {
+    const two = [makeCard(1), makeCard(2), makeCard(3), makeCard(4, { columnId: COL_DONE, position: 'a0' })];
+    const setupMove = () => {
+      const client = fakeClient();
+      render(
+        <CardModal
+          card={two[1]!}
+          state={makeState(two)}
+          client={client}
+          editors={[]}
+          members={[ada]}
+          readOnly={false}
+          selfUserId={ADA}
+          isOwner={false}
+          onClose={vi.fn()}
+        />,
+      );
+      return client;
+    };
+
+    it('shows where the card is and moves it to another column, at the top', async () => {
+      const client = setupMove();
+      const column = screen.getByRole('combobox', { name: 'Column' });
+      expect(column).toHaveValue(COL_TODO);
+      await userEvent.selectOptions(column, COL_DONE);
+      expect(client.moveCard).toHaveBeenCalledWith(two[1]!.id, COL_DONE, 0);
+    });
+
+    it('moves it to another place in the same column', async () => {
+      const client = setupMove();
+      const position = screen.getByRole('combobox', { name: 'Position' });
+      expect(position).toHaveValue('1'); // second of three
+      expect(
+        within(position)
+          .getAllByRole('option')
+          .map((o) => o.textContent),
+      ).toEqual(['1 of 3', '2 of 3', '3 of 3']);
+      await userEvent.selectOptions(position, '2');
+      expect(client.moveCard).toHaveBeenCalledWith(two[1]!.id, COL_TODO, 2);
+    });
+
+    it('is not offered to a viewer', () => {
+      setup({ readOnly: true });
+      expect(screen.queryByRole('combobox', { name: 'Column' })).not.toBeInTheDocument();
     });
   });
 

@@ -55,8 +55,11 @@
   - React Testing Library + jsdom as a `components` vitest project (run by `test:unit`): 50 tests over BoardView (search, activity, roles, card deleted while open), CardModal, Column and CardTile, driven with a spy client. `apps/web/test` is now typechecked
   - `routes.int.test.ts` (24 tests): every protected route needs a token, malformed ids, name/cursor/limit validation, stranger 404s, unknown routes, dev-login off, sign-in validation
   - Found and fixed: malformed JSON, oversized bodies and unsupported charsets/encodings answered 500 (and logged an error); now 400, 413 and 415
-- [ ] **Touch and keyboard drag and drop, ARIA pass** - HTML5 DnD in Column.tsx does not work on touch or keyboard
-  - Priority 21 (I4 R3 E3)
+- [x] ~~**Touch and keyboard drag and drop, ARIA pass**~~ (2026-10-21)
+  - Alt+arrows on a card (pure `cardMoveTarget`), move-left/right buttons on column headers, a Column + Position select in the card dialog (the touch path: no native touch drag was built, because browsers do not fire HTML5 DnD for touch and a pointer-events drag cannot be verified without a device), a polite live-region announcement and focus kept on what moved
+  - ARIA: column name is a real button (keyboard rename, no more `biome-ignore`), dialogs focus in, trap Tab and restore focus (`useDialogFocus`), shortcut help via `aria-describedby`; axe-core runs over the board, card dialog and share dialog (colour contrast is not covered: it needs a real browser)
+  - Also fixed: Activity/Share buttons had white text on a white background, and the assignee checkboxes were stretched to full width
+  - Verified: unit (moves, tile, column, modal, board, axe), e2e `keyboard.spec.ts` across two instances
 - [ ] **Offline command queue** - real queue and replay, if wanted after the copy fix
 - [ ] **CD, image publish, deploy guide** - publish images from CI; add docs for a production deploy
   - Priority 18 (I3 R3 E3)

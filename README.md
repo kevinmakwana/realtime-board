@@ -14,6 +14,7 @@ A collaborative kanban board where several people edit the same board at once an
 ## What it does
 
 - **Boards, columns, cards, comments** with drag and drop. Order uses fractional indexing, so a move rewrites one row, never its neighbours.
+- **Moving without a mouse.** On a focused card, `Alt`+arrow keys move it (up/down within the column, left/right to the next column) and a screen-reader announcement says where it went. Column headers have move-left/right buttons, the column name is a button (Enter renames), and the card dialog has Column and Position selects, which is also how to reorder on a touch screen (browsers do not fire HTML5 drag events for touch). Dialogs move focus in, keep Tab inside, and return focus when closed.
 - **Optimistic updates.** Your change shows instantly. If the server rejects it, it is rolled back and you are told why.
 - **Conflict handling.** Every card has a version. An edit or move based on a stale version is rejected, and the client resyncs.
 - **Presence.** Who is on the board, throttled live cursors, and "X is editing" on the card. Presence lives in Redis with a TTL, so a crashed browser or server disappears on its own.
