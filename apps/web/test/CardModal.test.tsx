@@ -338,7 +338,7 @@ describe('earlier comments', () => {
     const client = renderModal(stateWith({ count: 70, cursor: 'cur-1' }));
     await user.click(screen.getByRole('button', { name: 'Show earlier comments (70)' }));
     expect(spy).toHaveBeenCalledWith(makeState().board.id, card.id, 'cur-1');
-    expect(client.addOlderComments).toHaveBeenCalledWith(card.id, page, 'cur-2');
+    expect(client.addOlderComments).toHaveBeenCalledWith(card.id, page, 'cur-2', 'cur-1');
   });
 
   it('shows the error and stays usable when the page fails to load', async () => {

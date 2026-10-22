@@ -131,6 +131,27 @@ describe('event log retention', () => {
       expect(currentAck.ok && currentAck.mode).toBe('replay');
     });
 
+    it('never replays a log with a hole in it, even when the number of events happens to match', async () => {
+      const { owner, boardId, base } = await boardWithEvents(10, 0);
+      const head = (await world.service.latestSeq(boardId))!;
+      // Events base+3 and base+4 were pruned, and two more were appended after the server read the head.
+      await world.pool.query('DELETE FROM board_events WHERE board_id = $1 AND seq IN ($2, $3)', [
+        boardId,
+        base + 3,
+        base + 4,
+      ]);
+      await world.pool.query(
+        `INSERT INTO board_events (board_id, seq, type, payload, actor_id)
+         SELECT e.board_id, $2::int + g.n, e.type, e.payload, e.actor_id
+           FROM board_events e CROSS JOIN generate_series(1, 2) AS g(n)
+          WHERE e.board_id = $1 AND e.seq = $3`,
+        [boardId, head, base + 1],
+      );
+      const socket = await world.connect(server.port, owner.token);
+      const ack = await join(socket, boardId, base + 2); // behind = 8, and 8 events exist after base+2 (5..12)
+      expect(ack.ok && ack.mode).toBe('snapshot');
+    });
+
     it('answers a catch-up request for pruned history with 410, and a retained range normally', async () => {
       const { owner, boardId } = await boardWithEvents(12, 12);
       const last = (await world.service.latestSeq(boardId))!;

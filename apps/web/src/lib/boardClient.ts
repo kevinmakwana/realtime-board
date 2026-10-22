@@ -178,9 +178,9 @@ export class BoardClient {
   }
 
   /** Adds a page of a card's older comments that was fetched over REST (see `mergeOlderComments`). */
-  addOlderComments(cardId: string, page: Comment[], nextCursor: string | null): void {
+  addOlderComments(cardId: string, page: Comment[], nextCursor: string | null, requestCursor: string): void {
     if (!this.auth) return;
-    this.auth = mergeOlderComments(this.auth, cardId, page, nextCursor);
+    this.auth = mergeOlderComments(this.auth, cardId, page, nextCursor, requestCursor);
     this.update({});
   }
 

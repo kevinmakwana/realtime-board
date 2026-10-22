@@ -731,7 +731,7 @@ describe('older comments', () => {
     const { client } = await setup(3, 'editor', [comment(5)], older);
     expect(client.getSnapshot().state!.olderComments).toEqual(older);
 
-    client.addOlderComments(uid(101), [comment(1), comment(2)], null);
+    client.addOlderComments(uid(101), [comment(1), comment(2)], null, 'cur-1');
     expect(bodies(client)).toEqual(['Comment 1', 'Comment 2', 'Comment 5']);
     expect(client.getSnapshot().state!.olderComments).toEqual({});
   });
@@ -740,7 +740,7 @@ describe('older comments', () => {
     const { client } = await setup(3, 'editor', [comment(5)], { [uid(101)]: { count: 3, cursor: 'cur-1' } });
     const seen = vi.fn();
     client.subscribe(seen);
-    client.addOlderComments(uid(101), [comment(3), comment(4)], 'cur-2');
+    client.addOlderComments(uid(101), [comment(3), comment(4)], 'cur-2', 'cur-1');
     expect(seen).toHaveBeenCalled();
     expect(client.getSnapshot().state!.olderComments).toEqual({ [uid(101)]: { count: 1, cursor: 'cur-2' } });
   });
@@ -748,7 +748,7 @@ describe('older comments', () => {
   it('lets me edit a comment that was loaded later, like any other', async () => {
     const { socket, client } = await setup(3, 'editor', [comment(5)], older);
     const mine = { ...comment(1, 'mine'), authorId: ME.id, authorName: 'Ada' };
-    client.addOlderComments(uid(101), [mine], null);
+    client.addOlderComments(uid(101), [mine], null, 'cur-1');
     client.editComment(mine.id, 'fixed');
     await vi.advanceTimersByTimeAsync(0);
     expect(socket.last('comment:edit').payload).toMatchObject({ id: mine.id, body: 'fixed' });

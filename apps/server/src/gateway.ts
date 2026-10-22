@@ -219,8 +219,9 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
         const behind = lastSeq !== undefined ? head - lastSeq : null;
         if (lastSeq !== undefined && behind !== null && behind >= 0 && behind <= config.REPLAY_MAX_EVENTS) {
           const events = await service.eventsSince(boardId, lastSeq, config.REPLAY_MAX_EVENTS);
-          // Replay only if the log is contiguous; otherwise fall back to a full snapshot.
-          if (events.length === behind) {
+          // Replay only if the log is contiguous; otherwise fall back to a full snapshot. A matching count is not
+          // enough: events pruned from the start and others appended since `head` was read can cancel out.
+          if (events.length === behind && (behind === 0 || events[0]?.seq === lastSeq + 1)) {
             result = { mode: 'replay', events, seq: events.at(-1)?.seq ?? lastSeq };
           } else {
             result = { mode: 'snapshot', snapshot: await readSnapshot() };

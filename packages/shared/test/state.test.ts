@@ -255,13 +255,13 @@ describe('cards with comments that were not sent', () => {
     const c2 = comment('00000000-0000-4000-8000-000000000102', ids.card1, { body: 'b' });
 
     it('adds the page and moves the cursor back, counting down what is left', () => {
-      const s = mergeOlderComments(partial(), ids.card1, [c1, c2], 'cur-2');
+      const s = mergeOlderComments(partial(), ids.card1, [c1, c2], 'cur-2', 'cur-1');
       expect(Object.keys(s.comments).sort()).toEqual([c1.id, c2.id, ids.card3].sort());
       expect(s.olderComments).toEqual({ [ids.card1]: { count: 1, cursor: 'cur-2' } });
     });
 
     it('removes the record after the oldest page', () => {
-      expect(mergeOlderComments(partial(), ids.card1, [c1], null).olderComments).toEqual({});
+      expect(mergeOlderComments(partial(), ids.card1, [c1], null, 'cur-1').olderComments).toEqual({});
     });
 
     it('keeps the live version of a comment it already has, and ignores comments of another card', () => {
@@ -269,16 +269,74 @@ describe('cards with comments that were not sent', () => {
       const s0 = applyEvent(partial(), ev(11, 'comment.updated', { comment: live }));
       const stale = comment(ids.card3, ids.card1, { body: 'stale' });
       const foreign = comment('00000000-0000-4000-8000-000000000103', ids.card2, { body: 'wrong card' });
-      const s = mergeOlderComments(s0, ids.card1, [stale, foreign], null);
+      const s = mergeOlderComments(s0, ids.card1, [stale, foreign], null, 'cur-1');
       expect(s.comments[ids.card3]?.body).toBe('edited live');
       expect(s.comments[foreign.id]).toBeUndefined();
     });
 
     it('does not change the state it was given', () => {
       const s0 = partial();
-      mergeOlderComments(s0, ids.card1, [c1], null);
+      mergeOlderComments(s0, ids.card1, [c1], null, 'cur-1');
       expect(s0.olderComments).toEqual({ [ids.card1]: older });
       expect(Object.keys(s0.comments)).toEqual([ids.card3]);
     });
+  });
+});
+
+describe('comments changing while an older page is being fetched', () => {
+  const cursor = 'cur-1';
+  const partial = () =>
+    stateFromSnapshot({
+      board,
+      columns: [column(ids.colA, 'a0')],
+      cards: [card(ids.card1, ids.colA, 'a0')],
+      comments: [comment(ids.card3, ids.card1, { body: 'newest' })],
+      olderComments: { [ids.card1]: { count: 2, cursor } },
+      seq: 10,
+    });
+  const X = '00000000-0000-4000-8000-0000000000c1';
+  const Y = '00000000-0000-4000-8000-0000000000c2';
+
+  it('does not bring back a comment that was deleted while the page was on its way', () => {
+    // The page was read from the database before the delete committed, so it still has X.
+    const stalePage = [comment(X, ids.card1, { body: 'doomed' }), comment(Y, ids.card1, { body: 'kept' })];
+    const live = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: X }));
+    const s = mergeOlderComments(live, ids.card1, stalePage, null, cursor);
+    expect(Object.keys(s.comments).sort()).toEqual([Y, ids.card3].sort());
+  });
+
+  it('keeps an edit that arrived while the page was on its way, instead of the older text in the page', () => {
+    const stalePage = [comment(X, ids.card1, { body: 'before the edit' })];
+    const edited = comment(X, ids.card1, { body: 'after the edit', editedAt: '2026-01-02T00:00:00.000Z' });
+    const live = applyEvent(partial(), ev(11, 'comment.updated', { comment: edited }));
+    const s = mergeOlderComments(live, ids.card1, stalePage, null, cursor);
+    expect(s.comments[X]?.body).toBe('after the edit');
+  });
+
+  it('uses the latest of several edits, and a later delete beats an earlier edit', () => {
+    const v = (body: string) => comment(X, ids.card1, { body });
+    let live = applyEvent(partial(), ev(11, 'comment.updated', { comment: v('two') }));
+    live = applyEvent(live, ev(12, 'comment.updated', { comment: v('three') }));
+    expect(mergeOlderComments(live, ids.card1, [v('one')], null, cursor).comments[X]?.body).toBe('three');
+    live = applyEvent(live, ev(13, 'comment.deleted', { commentId: X }));
+    expect(mergeOlderComments(live, ids.card1, [v('one')], null, cursor).comments[X]).toBeUndefined();
+  });
+
+  it('drops a page that was requested before a new snapshot replaced the cursor', () => {
+    const resynced = stateFromSnapshot({
+      board,
+      columns: [column(ids.colA, 'a0')],
+      cards: [card(ids.card1, ids.colA, 'a0')],
+      comments: [comment(ids.card3, ids.card1, { body: 'newest' })],
+      olderComments: { [ids.card1]: { count: 12, cursor: 'cur-newer' } },
+      seq: 20,
+    });
+    const s = mergeOlderComments(resynced, ids.card1, [comment(X, ids.card1)], null, cursor);
+    expect(s).toBe(resynced); // nothing added, and the button for the newer cursor is still there
+  });
+
+  it('forgets what it remembered once the card has no older comments left', () => {
+    const live = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: X }));
+    expect(mergeOlderComments(live, ids.card1, [], null, cursor).olderComments).toEqual({});
   });
 });

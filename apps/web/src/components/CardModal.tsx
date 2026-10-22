@@ -55,7 +55,7 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
     setOlderError('');
     try {
       const page = await api.cardComments(state.board.id, card.id, older.cursor);
-      client.addOlderComments(card.id, page.comments, page.nextCursor);
+      client.addOlderComments(card.id, page.comments, page.nextCursor, older.cursor);
     } catch (e) {
       setOlderError(e instanceof Error ? e.message : 'Could not load earlier comments');
     } finally {
