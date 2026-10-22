@@ -1,7 +1,8 @@
+import { useMemo, useState } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Role } from '@board/shared';
+import { keyForIndex, selectCards, selectColumns, type BoardState, type Role } from '@board/shared';
 import { api } from '../src/api';
 import { BoardView } from '../src/components/BoardView';
 import type { BoardViewModel } from '../src/lib/boardClient';
@@ -272,5 +273,86 @@ describe('BoardView keyboard and screen-reader support', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(tile).toHaveFocus();
+  });
+});
+
+/** A board whose fake client really applies moves, so the DOM reorders the way it does for a person. */
+function LiveBoard() {
+  const [state, setState] = useState<BoardState>(() =>
+    makeState([makeCard(1, { title: 'One' }), makeCard(2, { title: 'Two' }), makeCard(3, { title: 'Three' })]),
+  );
+  const client = useMemo(() => {
+    const c = fakeClient();
+    c.moveCard.mockImplementation((id: string, columnId: string, index: number) => {
+      setState((s) => {
+        const others = selectCards(s, columnId).filter((x) => x.id !== id);
+        const card = { ...s.cards[id]!, columnId, position: keyForIndex(others, index) };
+        return { ...s, cards: { ...s.cards, [id]: card } };
+      });
+      return true;
+    });
+    c.moveColumn.mockImplementation((id: string, index: number) => {
+      setState((s) => {
+        const others = selectColumns(s).filter((x) => x.id !== id);
+        return { ...s, columns: { ...s.columns, [id]: { ...s.columns[id]!, position: keyForIndex(others, index) } } };
+      });
+      return true;
+    });
+    return c;
+  }, []);
+  const vm: BoardViewModel = {
+    status: 'live',
+    instance: 'a',
+    state,
+    presence: [],
+    cursors: [],
+    selfSocketId: 's1',
+    role: 'owner',
+  };
+  return <BoardView client={client} vm={vm} state={state} session={session} />;
+}
+
+describe('focus after a keyboard move, on a board that really reorders', () => {
+  it('keeps focus on a card that moved to another column', async () => {
+    const user = userEvent.setup();
+    render(<LiveBoard />);
+    screen.getByText('Two').closest<HTMLElement>('[data-testid=card]')?.focus();
+    await user.keyboard('{Alt>}{ArrowRight}{/Alt}');
+    const done = screen.getByTestId('cards-Done');
+    const moved = within(done).getByText('Two').closest<HTMLElement>('[data-testid=card]');
+    expect(moved).toHaveFocus();
+    await user.keyboard('{Alt>}{ArrowLeft}{/Alt}');
+    expect(screen.getByText('Two').closest('[data-testid=card]')).toHaveFocus();
+  });
+
+  it('keeps focus on a button of the column after it moved', async () => {
+    const user = userEvent.setup();
+    render(<LiveBoard />);
+    await user.click(screen.getByRole('button', { name: 'Move column To do right' }));
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Done', 'To do']);
+    // "To do" is now last, so its right button is disabled and focus lands on the left one.
+    expect(screen.getByRole('button', { name: 'Move column To do right' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move column To do left' })).toHaveFocus();
+  });
+
+  it('falls back to the other arrow when the column reaches the end', async () => {
+    const user = userEvent.setup();
+    render(<LiveBoard />);
+    await user.click(screen.getByRole('button', { name: 'Move column Done left' }));
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Done', 'To do']);
+    // "Done" is now first: its left button is disabled, so focus lands on the right one.
+    expect(screen.getByRole('button', { name: 'Move column Done right' })).toHaveFocus();
+  });
+});
+
+describe('a move the client refuses', () => {
+  it('is not announced as done', async () => {
+    const user = userEvent.setup();
+    const { client } = setup();
+    client.moveCard.mockReturnValue(false);
+    screen.getByText('Write release notes').closest<HTMLElement>('[data-testid=card]')?.focus();
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}');
+    expect(client.moveCard).toHaveBeenCalled();
+    expect(screen.getByTestId('move-announcement')).toBeEmptyDOMElement();
   });
 });

@@ -80,13 +80,13 @@ describe('Column', () => {
   it('renames the column from its heading, and Escape cancels', async () => {
     const user = userEvent.setup();
     const { client } = setup();
-    await user.click(screen.getByRole('button', { name: 'Rename column To do' }));
+    await user.click(screen.getByRole('button', { name: 'To do' }));
     const input = screen.getByRole('textbox', { name: 'Column name' });
     await user.clear(input);
     await user.type(input, 'Backlog{Enter}');
     expect(client.renameColumn).toHaveBeenCalledWith(COL_TODO, 'Backlog');
 
-    await user.click(screen.getByRole('button', { name: 'Rename column To do' }));
+    await user.click(screen.getByRole('button', { name: 'To do' }));
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('textbox', { name: 'Column name' })).not.toBeInTheDocument();
     expect(client.renameColumn).toHaveBeenCalledTimes(1);
@@ -122,10 +122,29 @@ describe('Column', () => {
     const user = userEvent.setup();
     const { client } = setup();
     await user.tab(); // first stop in the header is the name
-    expect(screen.getByRole('button', { name: 'Rename column To do' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'To do' })).toHaveFocus();
     await user.keyboard('{Enter}');
     await user.keyboard('{Control>}a{/Control}Backlog{Enter}');
     expect(client.renameColumn).toHaveBeenCalledWith(COL_TODO, 'Backlog');
+  });
+
+  it('puts focus back on the name when a rename is finished or cancelled from the keyboard', async () => {
+    const user = userEvent.setup();
+    setup();
+    const name = () => screen.getByRole('button', { name: 'To do' });
+    await user.click(name());
+    await user.keyboard('x{Enter}');
+    expect(name()).toHaveFocus();
+    await user.keyboard('{Enter}{Escape}');
+    expect(name()).toHaveFocus();
+  });
+
+  it('does not take focus back when the rename ends because the user clicked elsewhere', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'To do' }));
+    await user.click(screen.getByRole('button', { name: '+ Add card' }));
+    expect(screen.getByRole('textbox', { name: 'Card title' })).toHaveFocus();
   });
 
   it('has buttons to move the column, disabled at the ends of the board', async () => {
@@ -150,7 +169,7 @@ describe('Column', () => {
     expect(screen.queryByRole('button', { name: '+ Add card' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Delete column/ })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'To do' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Rename column To do' })).not.toBeInTheDocument(); // the name is not a rename button
+    expect(screen.queryByRole('button', { name: 'To do' })).not.toBeInTheDocument(); // the name is not a rename button
     expect(screen.queryByRole('button', { name: /Move column/ })).not.toBeInTheDocument();
   });
 });

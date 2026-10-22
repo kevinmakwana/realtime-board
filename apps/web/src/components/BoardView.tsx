@@ -47,7 +47,7 @@ export function BoardView({ client, vm, state, session }: Props) {
   function moveCardBy(cardId: string, dir: Direction) {
     const target = cardMoveTarget(state, cardId, dir);
     if (!target) return;
-    client.moveCard(cardId, target.columnId, target.index);
+    if (!client.moveCard(cardId, target.columnId, target.index)) return; // refused: the client has said why
     setAnnouncement(target.message);
     setRefocus([`[data-card-id="${cardId}"]`]);
   }
@@ -55,7 +55,7 @@ export function BoardView({ client, vm, state, session }: Props) {
   function moveColumnBy(columnId: string, dir: 'left' | 'right') {
     const target = columnMoveTarget(state, columnId, dir);
     if (!target) return;
-    client.moveColumn(columnId, target.index);
+    if (!client.moveColumn(columnId, target.index)) return;
     setAnnouncement(target.message);
     // Moving an element in the DOM drops its focus; the button may also have just become disabled (end of the row).
     const button = (d: string) => `[data-column-id="${columnId}"] [data-move-col="${d}"]:not(:disabled)`;

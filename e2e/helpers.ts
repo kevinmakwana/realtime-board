@@ -14,7 +14,7 @@ export async function addCard(page: Page, column: string, title: string) {
   await lane.getByRole('button', { name: '+ Add card' }).click();
   await lane.getByLabel('Card title').fill(title);
   await lane.getByLabel('Card title').press('Enter');
-  await lane.getByRole('button', { name: 'Done', exact: true }).click();
+  await lane.locator('.add-card-form').getByRole('button', { name: 'Done', exact: true }).click();
 }
 
 /** Invites someone through the REST API as the signed-in user of `page`. */

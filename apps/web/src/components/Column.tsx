@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   selectCards,
   selectComments,
@@ -53,6 +53,19 @@ export function Column({
   const [title, setTitle] = useState('');
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(column.name);
+  // Ending a rename with Enter or Escape unmounts the input; put focus back on the name so keyboard users keep their place.
+  const nameButton = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
+  useEffect(() => {
+    if (!renaming && restoreFocus.current) {
+      restoreFocus.current = false;
+      nameButton.current?.focus();
+    }
+  }, [renaming]);
+  const endRename = (restore: boolean) => {
+    restoreFocus.current = restore;
+    setRenaming(false);
+  };
 
   const allCards = selectCards(state, column.id);
   const cards = filter ? allCards.filter(filter) : allCards;
@@ -109,7 +122,7 @@ export function Column({
             onSubmit={(e) => {
               e.preventDefault();
               client.renameColumn(column.id, name);
-              setRenaming(false);
+              endRename(true);
             }}
           >
             <input
@@ -118,8 +131,8 @@ export function Column({
               value={name}
               maxLength={60}
               onChange={(e) => setName(e.target.value)}
-              onBlur={() => setRenaming(false)}
-              onKeyDown={(e) => e.key === 'Escape' && setRenaming(false)}
+              onBlur={() => endRename(false)}
+              onKeyDown={(e) => e.key === 'Escape' && endRename(true)}
             />
           </form>
         ) : (
@@ -130,8 +143,8 @@ export function Column({
               <button
                 type="button"
                 className="title-btn"
+                ref={nameButton}
                 title="Rename column"
-                aria-label={`Rename column ${column.name}`}
                 onClick={() => {
                   setName(column.name);
                   setRenaming(true);

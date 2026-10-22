@@ -62,7 +62,7 @@ test('cards and columns can be moved without dragging: Alt+arrows, header button
     await expect.poll(() => columnNames(grace)).toEqual(['In progress', 'To do', 'Done']);
     await expect(ada.getByRole('button', { name: 'Move column To do right' })).toBeFocused();
 
-    await ada.getByRole('button', { name: 'Rename column To do' }).focus();
+    await ada.getByRole('button', { name: 'To do', exact: true }).focus();
     await ada.keyboard.press('Enter');
     await ada.getByLabel('Column name').fill('Backlog');
     await ada.keyboard.press('Enter');
