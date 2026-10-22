@@ -115,4 +115,11 @@ export const migrations: { id: number; name: string; sql: string }[] = [
         ADD COLUMN labels       text[] NOT NULL DEFAULT '{}';
     `,
   },
+  {
+    id: 5,
+    name: 'event log retention index',
+    sql: `
+      CREATE INDEX board_events_created_idx ON board_events (created_at);
+    `,
+  },
 ];

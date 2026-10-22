@@ -163,9 +163,10 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 | `POST /api/auth/dev-login` | `{ email, name? }` returns a JWT. Disabled when `NODE_ENV=production` unless `AUTH_DEV_LOGIN=true`. All `/api/auth/*` routes answer `429` with `Retry-After` when rate limited. |
 | `POST /api/auth/magic-link` | `{ email }` emails a single-use sign-in link (printed to the server console when no SMTP server is configured). Always answers `{ ok: true }`, whether or not the email could be delivered. |
 | `POST /api/auth/verify` | `{ token }` exchanges a magic-link token for a JWT. |
-| `GET /api/boards`, `POST /api/boards` | List your boards (each with your `role`) or create one (new boards get To do, In progress, Done; the creator is the owner). |
+| `GET /api/boards?limit=50&before=<cursor>`, `POST /api/boards` | One page of your boards, newest first, each with your `role`: `{ boards, nextCursor }` (`limit` 1 to 100; pass `nextCursor` as `before` for the next page, `null` on the last). Or create one (new boards get To do, In progress, Done; the creator is the owner). |
 | `GET /api/boards/:id` | Snapshot with its `seq`. Members only; anyone else gets `404`. |
-| `GET /api/boards/:id/events?after=N` | Event log slice. Members only. |
+| `GET /api/boards/:id/events?after=N` | Event log slice. Members only. `410` when the log before `N` has been pruned (see retention below): load a snapshot instead. |
+| `GET /api/boards/:id/cards/:cardId/comments?before=<cursor>&limit=50` | A page of older comments, oldest first: `{ comments, nextCursor }`. Members only, viewers included. The snapshot carries only the newest 50 comments of each card plus, in `olderComments`, how many are missing and the first cursor. |
 | `GET /api/boards/:id/activity?limit=50` | The latest changes as readable lines (`{ entries: [{ seq, ts, actorName, text }] }`), newest first. Members only, viewers included. `limit` is clamped to 200. Built from the event log by `describeActivity` in `packages/shared`. |
 | `GET /api/boards/:id/members` | Members with names, colours and roles. The owner also gets emails and pending invites. |
 | `POST /api/boards/:id/members` | Owner only. `{ email, role: 'editor' \| 'viewer' }`. An existing user is added at once, anyone else gets a pending invite. |
@@ -178,6 +179,9 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 | `GET /metrics` | Prometheus text: process metrics, `http_requests_total`, `http_request_duration_seconds`, `ws_connections`, `board_commands_total{command,result}` and `board_command_duration_seconds`, all labelled with the instance. nginx does not proxy it, so scrape each instance directly. |
 
 ## Scaling notes
+
+- **Retention.** The board is the `columns`, `cards` and `comments` tables, which are always current, so they already act as the snapshot; the event log only serves reconnect catch-up and the activity feed. Each instance periodically (`RETENTION_INTERVAL_MINUTES`) tries to delete events older than `EVENT_RETENTION_DAYS` while always keeping a board's newest `EVENT_RETENTION_MIN_EVENTS`; a Postgres advisory lock lets one instance at a time do it, in batches, and `board_events_pruned_total` counts the rows. `boards.last_seq` is never touched, so numbering stays gapless. A client whose position was pruned gets a snapshot when it rejoins, because the gateway replays only a contiguous log.
+- **Presence broadcasts.** "Is editing" changes re-send the roster to the board; per board that is at most one every `PRESENCE_BROADCAST_MIN_MS`, the first immediately and the last state always. `Presence.setEditing` is one atomic Redis script, so it cannot resurrect a member who left meanwhile.
 
 - **Fan-out.** Every instance publishes to and subscribes from Redis through `@socket.io/redis-adapter`, so `io.to(room).emit` reaches sockets on any instance. Postgres is the only writer of truth, and Redis is never required to be durable.
 - **Ordering.** Writers on the same board are serialised by a row lock (`SELECT ... FOR UPDATE`), so `last_seq + 1` is gapless and commit order is `seq` order. Two instances can still *publish* seq 5 and 6 in the opposite order. Clients hold back anything past `lastSeq + 1` and, if the hole does not fill within 400 ms, rejoin with their `lastSeq` to fetch it.
@@ -219,6 +223,10 @@ docker/         nginx config for the scale profile
 | `SMTP_URL` | unset | For example `smtp://user:pass@smtp.example.com:587` (`smtps://` for TLS). Unset: emails are printed to the log. The server warns at start-up if this is unset in production |
 | `MAIL_FROM` | `Realtime Board <no-reply@localhost>` | The From address of sign-in and invitation emails |
 | `PRESENCE_TTL_SECONDS` | `30` | |
+| `PRESENCE_BROADCAST_MIN_MS` | `150` | Minimum gap between roster broadcasts caused by "is editing" changes, per board (0 sends every one) |
+| `EVENT_RETENTION_DAYS` | `90` | Board events older than this may be pruned. `0` keeps everything |
+| `EVENT_RETENTION_MIN_EVENTS` | `1000` | Each board always keeps at least this many of its newest events (minimum 500) |
+| `RETENTION_INTERVAL_MINUTES` | `60` | How often each instance tries to prune; `0` never |
 | `RATE_LIMIT_PER_SEC` / `RATE_LIMIT_BURST` | `20` / `40` | Commands per socket |
 | `CURSOR_RATE_PER_SEC` | `30` | |
 | `REPLAY_MAX_EVENTS` | `500` | Replay window before falling back to a snapshot |

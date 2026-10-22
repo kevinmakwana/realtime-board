@@ -48,4 +48,44 @@ describe('presence in Redis', () => {
     await presence.leave(board, m.socketId);
     expect(await presence.list(board)).toEqual([]);
   });
+
+  it('does not bring a member back to life when setEditing races with leave', async () => {
+    const board = randomUUID();
+    const m = member('Ada');
+    // A client whose reads stall, so a leave can land between "read the member" and "write it back".
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow = new Proxy(world.redis, {
+      get(target, prop, receiver) {
+        if (prop !== 'get') return Reflect.get(target, prop, receiver);
+        return async (...args: Parameters<typeof target.get>) => {
+          const value = await target.get(...args);
+          await gate;
+          return value;
+        };
+      },
+    });
+    const presence = new Presence(slow, 30);
+    await presence.join(board, m);
+    const editing = presence.setEditing(board, m.socketId, randomUUID());
+    await new Promise((r) => setTimeout(r, 50));
+    await presence.leave(board, m.socketId);
+    release();
+    await editing;
+    expect(await world.redis.exists(`presence:${board}:${m.socketId}`)).toBe(0);
+    expect(await presence.list(board)).toEqual([]);
+  });
+
+  it('keeps every other field of the member when the editing card changes', async () => {
+    const presence = new Presence(world.redis, 30);
+    const board = randomUUID();
+    const m = member('Ada');
+    await presence.join(board, m);
+    const card = randomUUID();
+    await presence.setEditing(board, m.socketId, card);
+    expect((await presence.list(board))[0]).toEqual({ ...m, editingCardId: card });
+    expect(await world.redis.ttl(`presence:${board}:${m.socketId}`)).toBeGreaterThan(20);
+  });
 });

@@ -898,3 +898,7 @@ textarea {
     min-height: 40px;
   }
 }
+
+.load-more {
+  margin-top: 12px;
+}

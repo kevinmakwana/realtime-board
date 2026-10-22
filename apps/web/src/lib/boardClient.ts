@@ -7,11 +7,13 @@ import {
   keyForIndex,
   selectCards,
   selectColumns,
+  mergeOlderComments,
   stateFromSnapshot,
   type Ack,
   type BoardEvent,
   type BoardState,
   type ClientToServerEvents,
+  type Comment,
   type JoinAck,
   type PendingOp,
   type PresenceMember,
@@ -173,6 +175,13 @@ export class BoardClient {
       selfSocketId: this.socket.id ?? null,
     };
     for (const fn of this.listeners) fn();
+  }
+
+  /** Adds a page of a card's older comments that was fetched over REST (see `mergeOlderComments`). */
+  addOlderComments(cardId: string, page: Comment[], nextCursor: string | null, requestCursor: string): void {
+    if (!this.auth) return;
+    this.auth = mergeOlderComments(this.auth, cardId, page, nextCursor, requestCursor);
+    this.update({});
   }
 
   dispose(): void {

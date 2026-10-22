@@ -15,6 +15,7 @@ import { type Mailer, createInviteNotifier, createMailer } from './mailer.js';
 import { createMetrics } from './metrics.js';
 import { MembershipService } from './membership.js';
 import { Presence } from './presence.js';
+import { Retention } from './retention.js';
 
 export interface ServerInstance {
   port: number;
@@ -76,6 +77,32 @@ export async function createServerInstance(
   const gateway = attachGateway({ io, service, presence, config, metrics, log });
   notifyAccess = gateway.applyAccessChange;
 
+  // Prune old board events. Every instance tries, an advisory lock lets one at a time through, and the first
+  // attempt is spread out so a fleet that restarts together does not all try at once.
+  const retention = new Retention(pool, {
+    days: config.EVENT_RETENTION_DAYS,
+    minEvents: config.EVENT_RETENTION_MIN_EVENTS,
+    batchSize: 5000,
+  });
+  const retentionTimers: NodeJS.Timeout[] = [];
+  if (config.EVENT_RETENTION_DAYS > 0 && config.RETENTION_INTERVAL_MINUTES > 0) {
+    const prune = async () => {
+      try {
+        const { pruned, skipped } = await retention.runOnce();
+        if (skipped) return;
+        metrics.observeRetention(pruned);
+        if (pruned > 0) log('pruned the board event log', { pruned });
+      } catch (err) {
+        log('event log retention failed', { level: 'error', error: String(err) });
+      }
+    };
+    retentionTimers.push(
+      setTimeout(prune, 5_000 + Math.random() * 55_000),
+      setInterval(prune, config.RETENTION_INTERVAL_MINUTES * 60_000),
+    );
+    for (const t of retentionTimers) t.unref();
+  }
+
   await new Promise<void>((resolve, reject) => {
     httpServer.once('error', reject);
     httpServer.listen(config.PORT, resolve);
@@ -89,6 +116,10 @@ export async function createServerInstance(
     io,
     async close() {
       gateway.stop();
+      for (const t of retentionTimers) {
+        clearTimeout(t);
+        clearInterval(t);
+      }
       await io.close(); // disconnects every socket and closes the http server
       // Let the per-socket 'disconnect' handlers finish their Redis/Postgres work first.
       await new Promise((r) => setTimeout(r, 50));

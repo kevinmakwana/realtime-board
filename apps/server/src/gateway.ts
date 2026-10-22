@@ -60,6 +60,40 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
     return members;
   }
 
+  // Coalesces roster broadcasts caused by "is editing" changes: the first goes out at once (leading edge), changes
+  // inside the window set a flag, and one more broadcast closes the window, so the last state always arrives.
+  const editingWindows = new Map<string, { dirty: boolean; timer: NodeJS.Timeout }>();
+  const logBroadcastFailure = (err: unknown) =>
+    log('presence broadcast failed', { level: 'error', error: String(err) });
+
+  function broadcastEditingChange(boardId: string): void {
+    const windowMs = config.PRESENCE_BROADCAST_MIN_MS;
+    if (windowMs === 0) {
+      broadcastPresence(boardId).catch(logBroadcastFailure);
+      return;
+    }
+    const open = editingWindows.get(boardId);
+    if (open) {
+      open.dirty = true;
+      return;
+    }
+    const entry = { dirty: false, timer: undefined as unknown as NodeJS.Timeout };
+    const close = () => {
+      if (!entry.dirty) {
+        editingWindows.delete(boardId);
+        return;
+      }
+      entry.dirty = false;
+      broadcastPresence(boardId).catch(logBroadcastFailure);
+      entry.timer = setTimeout(close, windowMs);
+      entry.timer.unref();
+    };
+    entry.timer = setTimeout(close, windowMs);
+    entry.timer.unref();
+    editingWindows.set(boardId, entry);
+    broadcastPresence(boardId).catch(logBroadcastFailure);
+  }
+
   async function leaveBoard(socket: BoardSocket, boardId: string): Promise<void> {
     if (!socket.data.boards.delete(boardId)) return;
     await socket.leave(roomOf(boardId));
@@ -185,8 +219,9 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
         const behind = lastSeq !== undefined ? head - lastSeq : null;
         if (lastSeq !== undefined && behind !== null && behind >= 0 && behind <= config.REPLAY_MAX_EVENTS) {
           const events = await service.eventsSince(boardId, lastSeq, config.REPLAY_MAX_EVENTS);
-          // Replay only if the log is contiguous; otherwise fall back to a full snapshot.
-          if (events.length === behind) {
+          // Replay only if the log is contiguous; otherwise fall back to a full snapshot. A matching count is not
+          // enough: events pruned from the start and others appended since `head` was read can cancel out.
+          if (events.length === behind && (behind === 0 || events[0]?.seq === lastSeq + 1)) {
             result = { mode: 'replay', events, seq: events.at(-1)?.seq ?? lastSeq };
           } else {
             result = { mode: 'snapshot', snapshot: await readSnapshot() };
@@ -235,7 +270,7 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
 
     command('presence:editing', async ({ boardId, cardId }) => {
       await presence.setEditing(boardId, socket.id, cardId);
-      await broadcastPresence(boardId);
+      broadcastEditingChange(boardId);
       return {};
     });
 
@@ -283,5 +318,10 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
   );
   timer.unref();
 
-  return { stop: () => clearInterval(timer), applyAccessChange };
+  const stop = () => {
+    clearInterval(timer);
+    for (const { timer: t } of editingWindows.values()) clearTimeout(t);
+    editingWindows.clear();
+  };
+  return { stop, applyAccessChange };
 }

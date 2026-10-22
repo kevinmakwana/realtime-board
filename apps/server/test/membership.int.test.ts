@@ -28,7 +28,7 @@ describe('membership data and enforcement', () => {
     expect(await world.service.role(mine.board.id, ada.id)).toBe('owner');
     expect(await world.service.role(mine.board.id, grace.id)).toBeNull();
 
-    const adaBoards = await world.service.listBoards(ada.id);
+    const adaBoards = (await world.service.listBoards(ada.id)).boards;
     expect(adaBoards.map((b) => b.id)).toContain(mine.board.id);
     expect(adaBoards.map((b) => b.id)).not.toContain(hers.board.id);
     expect(adaBoards.find((b) => b.id === mine.board.id)?.role).toBe('owner');

@@ -74,6 +74,7 @@ const METHODS = [
   'deleteColumn',
   'renameBoard',
   'setEditing',
+  'addOlderComments',
   'sendCursor',
 ] as const;
 

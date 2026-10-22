@@ -1,6 +1,20 @@
 import type { BoardEvent } from './events.js';
 import { compareOrdered } from './ordering.js';
-import { type Board, type BoardSnapshot, type Card, type Column, type Comment, normalizeCard } from './models.js';
+import {
+  type Board,
+  type BoardSnapshot,
+  type Card,
+  type Column,
+  type Comment,
+  type OlderComments,
+  normalizeCard,
+} from './models.js';
+
+/**
+ * What the client knows about a card's unsent comments: the server's record, plus what live events said about
+ * comments that are not loaded. A page read from the database may predate such an event, so on merge the event wins.
+ */
+export type OlderEntry = OlderComments[string] & { touched?: Record<string, Comment | null> };
 
 /** Authoritative board state: only ever changed by sequenced server events. */
 export interface BoardState {
@@ -8,6 +22,8 @@ export interface BoardState {
   columns: Record<string, Column>;
   cards: Record<string, Card>;
   comments: Record<string, Comment>;
+  /** Cards that have comments the server has not sent yet; see `olderCommentsSchema`. */
+  olderComments: Record<string, OlderEntry>;
   /** Highest event seq applied. */
   seq: number;
 }
@@ -21,6 +37,7 @@ export function stateFromSnapshot(s: BoardSnapshot): BoardState {
     columns: byId(s.columns),
     cards: byId(s.cards),
     comments: byId(s.comments),
+    olderComments: s.olderComments ?? {},
     seq: s.seq,
   };
 }
@@ -51,6 +68,7 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
       );
       next.cards = Object.fromEntries(Object.entries(state.cards).filter(([id]) => !doomed.has(id)));
       next.comments = Object.fromEntries(Object.entries(state.comments).filter(([, c]) => !doomed.has(c.cardId)));
+      next.olderComments = Object.fromEntries(Object.entries(state.olderComments).filter(([id]) => !doomed.has(id)));
       break;
     }
     case 'card.created':
@@ -62,19 +80,79 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
       const { [e.cardId]: _removed, ...cards } = state.cards;
       next.cards = cards;
       next.comments = Object.fromEntries(Object.entries(state.comments).filter(([, c]) => c.cardId !== e.cardId));
+      const { [e.cardId]: _older, ...olderComments } = state.olderComments;
+      next.olderComments = olderComments;
       break;
     }
     case 'comment.added':
-    case 'comment.updated':
       next.comments = { ...state.comments, [e.comment.id]: e.comment };
       break;
+    case 'comment.updated': {
+      const entry = state.olderComments[e.comment.cardId];
+      if (!state.comments[e.comment.id] && entry) {
+        // Not loaded (it is among the card's older ones): show it when that page is loaded, with this edit applied.
+        next.olderComments = {
+          ...state.olderComments,
+          [e.comment.cardId]: { ...entry, touched: { ...entry.touched, [e.comment.id]: e.comment } },
+        };
+        break;
+      }
+      next.comments = { ...state.comments, [e.comment.id]: e.comment };
+      break;
+    }
     case 'comment.deleted': {
-      const { [e.commentId]: _removed, ...comments } = state.comments;
+      const { [e.commentId]: removed, ...comments } = state.comments;
       next.comments = comments;
+      if (!removed) {
+        // The event does not say which card it belonged to, so remember it for every card with unloaded comments.
+        next.olderComments = Object.fromEntries(
+          Object.entries(state.olderComments).map(([cardId, entry]) => [
+            cardId,
+            { ...entry, touched: { ...entry.touched, [e.commentId]: null } },
+          ]),
+        );
+      }
       break;
     }
   }
   return next;
+}
+
+/**
+ * Adds a page of a card's older comments (already loaded from the server). Comments we already hold keep their
+ * live version, and a comment that live events edited or deleted while the page was on its way gets that outcome
+ * rather than what the page says. `nextCursor` is the cursor for the page before this one (null: this was the
+ * oldest). `requestCursor` is the cursor the page was requested with; if the card's cursor has moved on since
+ * (a new snapshot arrived), the page no longer fits and is dropped.
+ */
+export function mergeOlderComments(
+  state: BoardState,
+  cardId: string,
+  page: readonly Comment[],
+  nextCursor: string | null,
+  requestCursor: string,
+): BoardState {
+  const entry = state.olderComments[cardId];
+  if (!entry || entry.cursor !== requestCursor) return state;
+  const comments = { ...state.comments };
+  for (const c of page) {
+    if (c.cardId !== cardId || comments[c.id]) continue;
+    const live = entry.touched?.[c.id];
+    if (live === null) continue; // deleted since the page was read
+    comments[c.id] = live ?? c;
+  }
+  const { [cardId]: _done, ...others } = state.olderComments;
+  const olderComments = nextCursor
+    ? {
+        ...others,
+        [cardId]: {
+          count: Math.max(0, entry.count - page.length),
+          cursor: nextCursor,
+          ...(entry.touched && { touched: entry.touched }),
+        },
+      }
+    : others;
+  return { ...state, comments, olderComments };
 }
 
 export function applyEvents(state: BoardState, events: readonly BoardEvent[]): BoardState {

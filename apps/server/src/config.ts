@@ -33,6 +33,17 @@ const schema = z.object({
   AUTH_DEV_LOGIN: bool.optional(),
   /** Seconds a presence entry lives without a heartbeat (crashed clients/instances vanish after this). */
   PRESENCE_TTL_SECONDS: z.coerce.number().int().min(3).default(30),
+  /**
+   * "Is editing" changes (clicking in and out of fields) re-send the whole roster to the board. At most one such
+   * broadcast per board every this many milliseconds; the first goes out at once and the last state always arrives.
+   */
+  PRESENCE_BROADCAST_MIN_MS: z.coerce.number().int().min(0).default(150),
+  /** Board events older than this many days are pruned (the board itself is untouched). 0 keeps everything. */
+  EVENT_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
+  /** Whatever their age, each board keeps at least this many of its newest events. Replay and the activity feed need ~500. */
+  EVENT_RETENTION_MIN_EVENTS: z.coerce.number().int().min(500).default(1000),
+  /** How often each instance tries to prune (one at a time, cluster-wide). 0 never prunes automatically. */
+  RETENTION_INTERVAL_MINUTES: z.coerce.number().int().min(0).default(60),
   /** Sustained command rate allowed per socket (events/second) and burst size. */
   RATE_LIMIT_PER_SEC: z.coerce.number().positive().default(20),
   RATE_LIMIT_BURST: z.coerce.number().positive().default(40),
