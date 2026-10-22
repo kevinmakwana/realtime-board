@@ -173,3 +173,30 @@ describe('Column', () => {
     expect(screen.queryByRole('button', { name: /Move column/ })).not.toBeInTheDocument();
   });
 });
+
+describe('Column comment counts with partly loaded comments', () => {
+  it('counts the comments that were not sent along with the ones shown on the tile', () => {
+    const card = makeCard(1);
+    const base = makeState([card], [makeComment(1, card.id)]);
+    const state = { ...base, olderComments: { [card.id]: { count: 10, cursor: 'c' } } };
+    render(
+      <Column
+        column={state.columns[COL_TODO]!}
+        state={state}
+        client={fakeClient()}
+        draggingId={null}
+        setDraggingId={vi.fn()}
+        editorsByCard={new Map()}
+        members={new Map()}
+        filter={null}
+        onOpenCard={vi.fn()}
+        onMoveCard={vi.fn()}
+        onMoveColumn={vi.fn()}
+        readOnly={false}
+        dropMarker={null}
+        setDraggingColumnId={vi.fn()}
+      />,
+    );
+    expect(screen.getByText('11 comments')).toBeInTheDocument();
+  });
+});

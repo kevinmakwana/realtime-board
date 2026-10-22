@@ -20,7 +20,11 @@ import {
 } from '@board/shared';
 import type { Pool } from './db.js';
 import { ServiceError } from './errors.js';
+import { decodeCursor, encodeCursor } from './paging.js';
 import { roleOf } from './roles.js';
+
+/** A snapshot carries this many of the newest comments of each card; older ones are fetched on request. */
+export const SNAPSHOT_COMMENTS_PER_CARD = 50;
 
 /** How far back `activity()` reads so deleted things can still be named. */
 const ACTIVITY_LOOKBACK = 500;
@@ -90,14 +94,26 @@ export class BoardService {
 
   /* ---------------- reads ---------------- */
 
-  async listBoards(userId: string): Promise<BoardWithRole[]> {
+  /** One page of my boards, newest first. `nextCursor` is null on the last page. */
+  async listBoards(
+    userId: string,
+    page: { limit: number; before?: string } = { limit: 50 },
+  ): Promise<{ boards: BoardWithRole[]; nextCursor: string | null }> {
+    const after = page.before ? decodeCursor(page.before) : null;
     const { rows } = await this.pool.query(
-      `SELECT b.id, b.name, b.created_at, m.role
+      `SELECT b.id, b.name, b.created_at, b.created_at::text AS cursor_ts, m.role
          FROM boards b JOIN board_members m ON m.board_id = b.id
-        WHERE m.user_id = $1 ORDER BY b.created_at DESC LIMIT 100`,
-      [userId],
+        WHERE m.user_id = $1 AND ($2::timestamptz IS NULL OR (b.created_at, b.id) < ($2::timestamptz, $3::uuid))
+        ORDER BY b.created_at DESC, b.id DESC LIMIT $4`,
+      [userId, after?.ts ?? null, after?.id ?? null, page.limit + 1],
     );
-    return rows.map((r) => ({ ...toBoard(r), role: r.role as Role }));
+    const more = rows.length > page.limit;
+    const shown = more ? rows.slice(0, page.limit) : rows;
+    const last = shown.at(-1);
+    return {
+      boards: shown.map((r) => ({ ...toBoard(r), role: r.role as Role })),
+      nextCursor: more && last ? encodeCursor({ ts: last.cursor_ts as string, id: last.id as string }) : null,
+    };
   }
 
   async role(boardId: string, userId: string): Promise<Role | null> {
@@ -130,16 +146,33 @@ export class BoardService {
       const cols = await client.query('SELECT * FROM columns WHERE board_id = $1 ORDER BY position, id', [boardId]);
       const cards = await client.query('SELECT * FROM cards WHERE board_id = $1 ORDER BY position, id', [boardId]);
       const comments = await client.query(
-        `SELECT c.*, u.name AS author_name FROM comments c JOIN users u ON u.id = c.author_id
-         WHERE c.board_id = $1 ORDER BY c.created_at, c.id`,
-        [boardId],
+        `SELECT t.* FROM (
+           SELECT c.*, u.name AS author_name, c.created_at::text AS cursor_ts,
+                  row_number() OVER (PARTITION BY c.card_id ORDER BY c.created_at DESC, c.id DESC) AS rn,
+                  count(*) OVER (PARTITION BY c.card_id) AS total
+             FROM comments c JOIN users u ON u.id = c.author_id
+            WHERE c.board_id = $1
+         ) t WHERE t.rn <= $2 ORDER BY t.created_at, t.id`,
+        [boardId, SNAPSHOT_COMMENTS_PER_CARD],
       );
       await client.query('COMMIT');
+      // For a card with more comments than were sent: how many are missing and where the page before the oldest sent starts.
+      const olderComments: Record<string, { count: number; cursor: string }> = {};
+      for (const r of comments.rows) {
+        const total = Number(r.total);
+        if (total > SNAPSHOT_COMMENTS_PER_CARD && Number(r.rn) === SNAPSHOT_COMMENTS_PER_CARD) {
+          olderComments[r.card_id as string] = {
+            count: total - SNAPSHOT_COMMENTS_PER_CARD,
+            cursor: encodeCursor({ ts: r.cursor_ts as string, id: r.id as string }),
+          };
+        }
+      }
       return {
         board: toBoard(boardRow),
         columns: cols.rows.map(toColumn),
         cards: cards.rows.map(toCard),
         comments: comments.rows.map(toComment),
+        ...(Object.keys(olderComments).length > 0 && { olderComments }),
         seq: boardRow.last_seq as number,
       };
     } catch (err) {
@@ -148,6 +181,34 @@ export class BoardService {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * A page of a card's comments older than `before` (a cursor from the snapshot or a previous page), or the newest
+   * ones when `before` is omitted. Oldest first. `nextCursor` asks for the page before this one; null when none.
+   */
+  async commentsPage(
+    boardId: string,
+    cardId: string,
+    page: { limit: number; before?: string },
+  ): Promise<{ comments: Comment[]; nextCursor: string | null }> {
+    const card = await this.pool.query('SELECT 1 FROM cards WHERE id = $1 AND board_id = $2', [cardId, boardId]);
+    if (!card.rowCount) throw new ServiceError('NOT_FOUND', 'Card not found');
+    const after = page.before ? decodeCursor(page.before) : null;
+    const { rows } = await this.pool.query(
+      `SELECT c.*, u.name AS author_name, c.created_at::text AS cursor_ts
+         FROM comments c JOIN users u ON u.id = c.author_id
+        WHERE c.card_id = $1 AND ($2::timestamptz IS NULL OR (c.created_at, c.id) < ($2::timestamptz, $3::uuid))
+        ORDER BY c.created_at DESC, c.id DESC LIMIT $4`,
+      [cardId, after?.ts ?? null, after?.id ?? null, page.limit + 1],
+    );
+    const more = rows.length > page.limit;
+    const shown = more ? rows.slice(0, page.limit) : rows;
+    const oldest = shown.at(-1);
+    return {
+      comments: shown.reverse().map(toComment),
+      nextCursor: more && oldest ? encodeCursor({ ts: oldest.cursor_ts as string, id: oldest.id as string }) : null,
+    };
   }
 
   /** Events with seq > `after`, oldest first. */

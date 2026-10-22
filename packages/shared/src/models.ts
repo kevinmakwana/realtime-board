@@ -91,11 +91,24 @@ export const commentSchema = z.object({
 });
 export type Comment = z.infer<typeof commentSchema>;
 
+/**
+ * A snapshot carries only the newest comments of a busy card. For each card with more, how many were left out
+ * (a hint: it is not decremented when an unloaded comment is deleted live) and a cursor that asks the server for
+ * the page before the oldest comment sent.
+ */
+export const olderCommentsSchema = z.record(
+  idSchema,
+  z.object({ count: z.number().int().nonnegative(), cursor: z.string() }),
+);
+export type OlderComments = z.infer<typeof olderCommentsSchema>;
+
 export const boardSnapshotSchema = z.object({
   board: boardSchema,
   columns: z.array(columnSchema),
   cards: z.array(cardSchema),
   comments: z.array(commentSchema),
+  /** Absent when every comment is included. */
+  olderComments: olderCommentsSchema.optional(),
   /** Last event sequence number included in this snapshot. */
   seq: z.number().int().nonnegative(),
 });

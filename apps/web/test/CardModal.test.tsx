@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { Card, Comment, Member } from '@board/shared';
+import { api } from '../src/api';
 import { CardModal } from '../src/components/CardModal';
 import {
   ada,
@@ -300,3 +301,58 @@ describe('CardModal', () => {
 function fireChange(input: HTMLElement, value: string) {
   fireEvent.change(input, { target: { value } });
 }
+
+describe('earlier comments', () => {
+  const card = makeCard(1);
+  const stateWith = (older?: { count: number; cursor: string }) => {
+    const state = makeState([card], [makeComment(9, card.id, { body: 'newest' })]);
+    return older ? { ...state, olderComments: { [card.id]: older } } : state;
+  };
+  const renderModal = (state: ReturnType<typeof makeState>) => {
+    const client = fakeClient();
+    render(
+      <CardModal
+        card={card}
+        state={state}
+        client={client}
+        editors={[]}
+        members={[ada]}
+        readOnly={false}
+        selfUserId={ADA}
+        isOwner={false}
+        onClose={vi.fn()}
+      />,
+    );
+    return client;
+  };
+
+  it('offers nothing when every comment was sent', () => {
+    renderModal(stateWith());
+    expect(screen.queryByRole('button', { name: /earlier comments/ })).not.toBeInTheDocument();
+  });
+
+  it('shows how many are missing and fetches the page before the cursor', async () => {
+    const user = userEvent.setup();
+    const page = [makeComment(1, card.id, { body: 'oldest' })];
+    const spy = vi.spyOn(api, 'cardComments').mockResolvedValue({ comments: page, nextCursor: 'cur-2' });
+    const client = renderModal(stateWith({ count: 70, cursor: 'cur-1' }));
+    await user.click(screen.getByRole('button', { name: 'Show earlier comments (70)' }));
+    expect(spy).toHaveBeenCalledWith(makeState().board.id, card.id, 'cur-1');
+    expect(client.addOlderComments).toHaveBeenCalledWith(card.id, page, 'cur-2');
+  });
+
+  it('shows the error and stays usable when the page fails to load', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(api, 'cardComments').mockRejectedValue(new Error('Network down'));
+    const client = renderModal(stateWith({ count: 5, cursor: 'cur-1' }));
+    await user.click(screen.getByRole('button', { name: 'Show earlier comments (5)' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Network down');
+    expect(client.addOlderComments).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Show earlier comments (5)' })).toBeEnabled();
+  });
+
+  it('leaves out the number once it reaches zero but a cursor remains', () => {
+    renderModal(stateWith({ count: 0, cursor: 'cur-1' }));
+    expect(screen.getByRole('button', { name: 'Show earlier comments' })).toBeInTheDocument();
+  });
+});

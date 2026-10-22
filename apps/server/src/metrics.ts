@@ -6,6 +6,8 @@ export interface Metrics {
   observeCommand(command: string, result: string, seconds: number): void;
   /** Tell the ws_connections gauge where to read the live socket count from. */
   trackSockets(count: () => number): void;
+  /** A retention pass finished and removed this many events. */
+  observeRetention(pruned: number): void;
 }
 
 /** One registry per server instance, so several instances in a process (tests) never share counters. */
@@ -39,6 +41,11 @@ export function createMetrics(instance: string): Metrics {
     buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
     registers: [registry],
   });
+  const pruned = new Counter({
+    name: 'board_events_pruned_total',
+    help: 'Board events deleted by the retention job',
+    registers: [registry],
+  });
   let socketCount = () => 0;
   new Gauge({
     name: 'ws_connections',
@@ -61,6 +68,9 @@ export function createMetrics(instance: string): Metrics {
     },
     trackSockets(count) {
       socketCount = count;
+    },
+    observeRetention(n) {
+      pruned.inc(n);
     },
   };
 }

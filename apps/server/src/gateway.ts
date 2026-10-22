@@ -60,6 +60,40 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
     return members;
   }
 
+  // Coalesces roster broadcasts caused by "is editing" changes: the first goes out at once (leading edge), changes
+  // inside the window set a flag, and one more broadcast closes the window, so the last state always arrives.
+  const editingWindows = new Map<string, { dirty: boolean; timer: NodeJS.Timeout }>();
+  const logBroadcastFailure = (err: unknown) =>
+    log('presence broadcast failed', { level: 'error', error: String(err) });
+
+  function broadcastEditingChange(boardId: string): void {
+    const windowMs = config.PRESENCE_BROADCAST_MIN_MS;
+    if (windowMs === 0) {
+      broadcastPresence(boardId).catch(logBroadcastFailure);
+      return;
+    }
+    const open = editingWindows.get(boardId);
+    if (open) {
+      open.dirty = true;
+      return;
+    }
+    const entry = { dirty: false, timer: undefined as unknown as NodeJS.Timeout };
+    const close = () => {
+      if (!entry.dirty) {
+        editingWindows.delete(boardId);
+        return;
+      }
+      entry.dirty = false;
+      broadcastPresence(boardId).catch(logBroadcastFailure);
+      entry.timer = setTimeout(close, windowMs);
+      entry.timer.unref();
+    };
+    entry.timer = setTimeout(close, windowMs);
+    entry.timer.unref();
+    editingWindows.set(boardId, entry);
+    broadcastPresence(boardId).catch(logBroadcastFailure);
+  }
+
   async function leaveBoard(socket: BoardSocket, boardId: string): Promise<void> {
     if (!socket.data.boards.delete(boardId)) return;
     await socket.leave(roomOf(boardId));
@@ -235,7 +269,7 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
 
     command('presence:editing', async ({ boardId, cardId }) => {
       await presence.setEditing(boardId, socket.id, cardId);
-      await broadcastPresence(boardId);
+      broadcastEditingChange(boardId);
       return {};
     });
 
@@ -283,5 +317,10 @@ export function attachGateway(deps: Deps): { stop: () => void; applyAccessChange
   );
   timer.unref();
 
-  return { stop: () => clearInterval(timer), applyAccessChange };
+  const stop = () => {
+    clearInterval(timer);
+    for (const { timer: t } of editingWindows.values()) clearTimeout(t);
+    editingWindows.clear();
+  };
+  return { stop, applyAccessChange };
 }

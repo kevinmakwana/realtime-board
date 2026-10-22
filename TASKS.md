@@ -63,10 +63,13 @@
 - [ ] **Offline command queue** - real queue and replay, if wanted after the copy fix
 - [ ] **CD, image publish, deploy guide** - publish images from CI; add docs for a production deploy
   - Priority 18 (I3 R3 E3)
-- [ ] **Paging for boards and comments; throttle presence rebroadcasts** - `listBoards` is capped at 100; comments all load with the snapshot; `presence:editing` rebroadcasts the full roster. Also fix the read-modify-write race in `Presence.setEditing`
-  - Priority 16 (I2 R2 E2)
-- [ ] **Event-log retention or compaction** - periodic snapshots, prune old `board_events`
-  - Priority 15 (I2 R3 E3)
+- [x] ~~**Paging for boards and comments; throttle presence rebroadcasts**~~ (2026-10-22)
+  - Boards: keyset cursor (`created_at`, `id`; full microsecond text, so ties and precision are safe), `?limit=&before=`, `nextCursor`; the boards page has "Load more boards". Comments: the snapshot sends the newest 50 per card with `olderComments {count, cursor}`, `GET .../cards/:cardId/comments?before=`, a pure `mergeOlderComments`, "Show earlier comments" in the card dialog; an edit to an unloaded comment is ignored by the reducer until it is loaded. Presence: `setEditing` is one atomic Lua script (a test reproduced a left member being revived), and "is editing" broadcasts are throttled per board (`PRESENCE_BROADCAST_MIN_MS`, leading edge plus a final one)
+  - Known limit: `count` is a hint and is not reduced when an unloaded comment is deleted live; a full re-snapshot forgets pages loaded earlier
+  - Verified: shared, server (paging, throttle, race, routes), client and component tests, e2e with 55 comments
+- [x] ~~**Event-log retention or compaction**~~ (2026-10-22)
+  - `Retention` job (advisory-lock so one instance at a time, batched deletes, migration 5 adds an index on `created_at`): deletes events older than `EVENT_RETENTION_DAYS` (90) but always keeps a board's newest `EVENT_RETENTION_MIN_EVENTS` (1000, minimum 500 = replay window and activity lookback). No separate snapshot step is needed because the entity tables are the snapshot; a client behind the pruned range gets a snapshot on join, and `GET /events` answers 410. `board_events_pruned_total` metric
+  - Verified: 10 integration tests (keeps newest N, recent events, batches, off switch, lock, gapless numbering after a prune, replay vs snapshot, 410, activity)
 - [ ] **Load test** - k6 or artillery against the scale profile to back the README scaling claims
 - [ ] **Consider websocket-only transport** - would remove the nginx sticky-session hashing, at the cost of no polling fallback
 

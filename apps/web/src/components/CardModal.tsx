@@ -11,6 +11,7 @@ import {
 import type { BoardClient } from '../lib/boardClient';
 import { labelHue } from '../lib/cardMeta';
 import { useDialogFocus } from '../lib/useDialogFocus';
+import { api } from '../api';
 import { CommentItem } from './CommentItem';
 
 interface Props {
@@ -44,6 +45,23 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
   const comments = selectComments(state, card.id);
   const column = state.columns[card.columnId];
   const dialogRef = useDialogFocus<HTMLDivElement>();
+  const older = state.olderComments[card.id];
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState('');
+
+  async function loadOlder() {
+    if (!older || loadingOlder) return;
+    setLoadingOlder(true);
+    setOlderError('');
+    try {
+      const page = await api.cardComments(state.board.id, card.id, older.cursor);
+      client.addOlderComments(card.id, page.comments, page.nextCursor);
+    } catch (e) {
+      setOlderError(e instanceof Error ? e.message : 'Could not load earlier comments');
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
   const columns = selectColumns(state);
   const siblings = selectCards(state, card.columnId);
   const place = siblings.findIndex((c) => c.id === card.id);
@@ -256,6 +274,18 @@ export function CardModal({ card, state, client, editors, members, readOnly, sel
         </fieldset>
 
         <h3>Comments</h3>
+        {older && (
+          <div>
+            <button type="button" className="btn ghost" disabled={loadingOlder} onClick={loadOlder}>
+              {loadingOlder ? 'Loading…' : `Show earlier comments${older.count > 0 ? ` (${older.count})` : ''}`}
+            </button>
+            {olderError && (
+              <p role="alert" className="error">
+                {olderError}
+              </p>
+            )}
+          </div>
+        )}
         <ul className="comments">
           {comments.map((c) => (
             <CommentItem

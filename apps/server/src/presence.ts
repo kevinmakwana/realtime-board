@@ -1,6 +1,15 @@
 import type { PresenceMember } from '@board/shared';
 import type { Redis } from 'ioredis';
 
+const SET_EDITING = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local member = cjson.decode(raw)
+if ARGV[1] == '' then member.editingCardId = cjson.null else member.editingCardId = ARGV[1] end
+redis.call('SET', KEYS[1], cjson.encode(member), 'EX', tonumber(ARGV[2]))
+return 1
+`;
+
 /**
  * Presence lives in Redis so every instance sees the same roster.
  *
@@ -28,11 +37,13 @@ export class Presence {
       .exec();
   }
 
+  /**
+   * Sets which card a member is editing. One atomic step on the server: a read in the app followed by a write
+   * could bring back a member who left (or whose entry expired) in between, and would overwrite a newer value.
+   * Does nothing if the member is gone, and leaves every other field as it was.
+   */
   async setEditing(boardId: string, socketId: string, cardId: string | null): Promise<void> {
-    const raw = await this.redis.get(this.key(boardId, socketId));
-    if (!raw) return;
-    const member = { ...(JSON.parse(raw) as PresenceMember), editingCardId: cardId };
-    await this.redis.set(this.key(boardId, socketId), JSON.stringify(member), 'EX', this.ttlSeconds);
+    await this.redis.eval(SET_EDITING, 1, this.key(boardId, socketId), cardId ?? '', this.ttlSeconds);
   }
 
   async leave(boardId: string, socketId: string): Promise<void> {

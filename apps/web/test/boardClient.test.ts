@@ -30,7 +30,11 @@ const card = (n: number, columnId: string, position: string, version = 1): Card 
   labels: [],
 });
 
-const snapshot = (seq = 3, comments: Comment[] = []): BoardSnapshot => ({
+const snapshot = (
+  seq = 3,
+  comments: Comment[] = [],
+  olderComments?: BoardSnapshot['olderComments'],
+): BoardSnapshot => ({
   board: { id: BOARD, name: 'Roadmap', createdAt: 'x' },
   columns: [
     { id: COL_A, boardId: BOARD, name: 'To do', position: 'a0' },
@@ -38,6 +42,7 @@ const snapshot = (seq = 3, comments: Comment[] = []): BoardSnapshot => ({
   ],
   cards: [card(1, COL_A, 'a0'), card(2, COL_A, 'a1')],
   comments,
+  ...(olderComments && { olderComments }),
   seq,
 });
 
@@ -88,14 +93,19 @@ class FakeSocket {
   }
 }
 
-async function setup(seq = 3, role: 'owner' | 'editor' | 'viewer' = 'editor', comments: Comment[] = []) {
+async function setup(
+  seq = 3,
+  role: 'owner' | 'editor' | 'viewer' = 'editor',
+  comments: Comment[] = [],
+  older?: BoardSnapshot['olderComments'],
+) {
   const socket = new FakeSocket();
   const client = new BoardClient(socket as unknown as BoardSocket, BOARD, ME);
   const join = socket.last('board:join');
   join.ack!(null, {
     ok: true,
     mode: 'snapshot',
-    snapshot: snapshot(seq, comments),
+    snapshot: snapshot(seq, comments, older),
     instance: 'server-1',
     presence: [],
     role,
@@ -700,5 +710,48 @@ describe('a join answered after access was revoked', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(client.getSnapshot().status).toBe('removed');
     expect(client.getSnapshot().role).toBeNull();
+  });
+});
+
+describe('older comments', () => {
+  const comment = (n: number, body = `Comment ${n}`): Comment => ({
+    id: uid(400 + n),
+    boardId: BOARD,
+    cardId: uid(101),
+    authorId: uid(9),
+    authorName: 'Someone',
+    body,
+    createdAt: `2026-01-01T00:00:${String(n).padStart(2, '0')}.000Z`,
+    editedAt: null,
+  });
+  const bodies = (client: BoardClient) => selectComments(client.getSnapshot().state!, uid(101)).map((c) => c.body);
+  const older = { [uid(101)]: { count: 2, cursor: 'cur-1' } };
+
+  it('keeps the cursor from the snapshot, and merges a fetched page in order before the newest', async () => {
+    const { client } = await setup(3, 'editor', [comment(5)], older);
+    expect(client.getSnapshot().state!.olderComments).toEqual(older);
+
+    client.addOlderComments(uid(101), [comment(1), comment(2)], null);
+    expect(bodies(client)).toEqual(['Comment 1', 'Comment 2', 'Comment 5']);
+    expect(client.getSnapshot().state!.olderComments).toEqual({});
+  });
+
+  it('keeps the new cursor while there are still older pages, and tells subscribers', async () => {
+    const { client } = await setup(3, 'editor', [comment(5)], { [uid(101)]: { count: 3, cursor: 'cur-1' } });
+    const seen = vi.fn();
+    client.subscribe(seen);
+    client.addOlderComments(uid(101), [comment(3), comment(4)], 'cur-2');
+    expect(seen).toHaveBeenCalled();
+    expect(client.getSnapshot().state!.olderComments).toEqual({ [uid(101)]: { count: 1, cursor: 'cur-2' } });
+  });
+
+  it('lets me edit a comment that was loaded later, like any other', async () => {
+    const { socket, client } = await setup(3, 'editor', [comment(5)], older);
+    const mine = { ...comment(1, 'mine'), authorId: ME.id, authorName: 'Ada' };
+    client.addOlderComments(uid(101), [mine], null);
+    client.editComment(mine.id, 'fixed');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.last('comment:edit').payload).toMatchObject({ id: mine.id, body: 'fixed' });
+    expect(bodies(client)).toEqual(['fixed', 'Comment 5']);
   });
 });

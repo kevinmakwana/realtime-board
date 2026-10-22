@@ -14,6 +14,7 @@ import { type Mailer, magicLinkMail } from './mailer.js';
 import type { Metrics } from './metrics.js';
 import { checkReadiness, observeHttp } from './observability.js';
 import type { MembershipService } from './membership.js';
+import { cursorParam, limitParam } from './paging.js';
 
 interface Deps {
   config: Config;
@@ -139,7 +140,9 @@ export function createApp({ config, pool, redis, service, membership, mailer, me
   };
 
   api.get('/boards', async (req: AuthedRequest, res) => {
-    res.json({ boards: await service.listBoards(req.userId!) });
+    const limit = limitParam(100, 50).parse(req.query.limit);
+    const before = cursorParam.optional().parse(req.query.before);
+    res.json(await service.listBoards(req.userId!, { limit, before }));
   });
 
   api.post('/boards', async (req: AuthedRequest, res) => {
@@ -159,7 +162,22 @@ export function createApp({ config, pool, redis, service, membership, mailer, me
     const id = z.uuid().parse(req.params.id);
     await mustBeMember(id, req.userId!);
     const after = z.coerce.number().int().min(0).default(0).parse(req.query.after);
-    res.json({ events: await service.eventsSince(id, after, 500) });
+    const events = await service.eventsSince(id, after, 500);
+    // Old events are pruned. A range that starts later than asked has a hole in it, which a client must not
+    // apply as if it were complete: it has to load a fresh snapshot instead.
+    if (events[0] && events[0].seq > after + 1) {
+      throw new HttpError(410, 'That part of the history has been pruned; load a fresh snapshot instead');
+    }
+    res.json({ events });
+  });
+
+  api.get('/boards/:id/cards/:cardId/comments', async (req: AuthedRequest, res) => {
+    const id = z.uuid().parse(req.params.id);
+    const cardId = z.uuid().parse(req.params.cardId);
+    await mustBeMember(id, req.userId!);
+    const limit = limitParam(100, 50).parse(req.query.limit);
+    const before = cursorParam.optional().parse(req.query.before);
+    res.json(await service.commentsPage(id, cardId, { limit, before }));
   });
 
   api.get('/boards/:id/activity', async (req: AuthedRequest, res) => {

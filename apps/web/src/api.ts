@@ -3,6 +3,7 @@ import type {
   AddMemberResult,
   BoardSnapshot,
   BoardWithRole,
+  Comment,
   GrantableRole,
   MembersResponse,
   PublicUser,
@@ -72,10 +73,19 @@ export const api = {
   devLogin: (email: string, name?: string) => request<Session>('/api/auth/dev-login', { body: { email, name } }),
   magicLink: (email: string) => request<{ ok: true }>('/api/auth/magic-link', { body: { email } }),
   verify: (token: string) => request<Session>('/api/auth/verify', { body: { token } }),
-  listBoards: () => request<{ boards: BoardWithRole[] }>('/api/boards'),
+  /** One page of my boards, newest first; pass the previous page's `nextCursor` as `before` for the next one. */
+  listBoards: (before?: string) =>
+    request<{ boards: BoardWithRole[]; nextCursor: string | null }>(
+      `/api/boards${before ? `?before=${encodeURIComponent(before)}` : ''}`,
+    ),
   deleteBoard: (boardId: string) => request<{ ok: true }>(`/api/boards/${boardId}`, { method: 'DELETE' }),
   activity: (boardId: string, limit = 50) =>
     request<{ entries: ActivityEntry[] }>(`/api/boards/${boardId}/activity?limit=${limit}`),
+  /** Older comments of a card than `before` (the cursor from the snapshot or the previous page), oldest first. */
+  cardComments: (boardId: string, cardId: string, before: string) =>
+    request<{ comments: Comment[]; nextCursor: string | null }>(
+      `/api/boards/${boardId}/cards/${cardId}/comments?before=${encodeURIComponent(before)}`,
+    ),
   listMembers: (boardId: string) => request<MembersResponse>(`/api/boards/${boardId}/members`),
   addMember: (boardId: string, email: string, role: GrantableRole) =>
     request<AddMemberResult>(`/api/boards/${boardId}/members`, { body: { email, role } }),

@@ -1,6 +1,14 @@
 import type { BoardEvent } from './events.js';
 import { compareOrdered } from './ordering.js';
-import { type Board, type BoardSnapshot, type Card, type Column, type Comment, normalizeCard } from './models.js';
+import {
+  type Board,
+  type BoardSnapshot,
+  type Card,
+  type Column,
+  type Comment,
+  type OlderComments,
+  normalizeCard,
+} from './models.js';
 
 /** Authoritative board state: only ever changed by sequenced server events. */
 export interface BoardState {
@@ -8,6 +16,8 @@ export interface BoardState {
   columns: Record<string, Column>;
   cards: Record<string, Card>;
   comments: Record<string, Comment>;
+  /** Cards that have comments the server has not sent yet; see `olderCommentsSchema`. */
+  olderComments: OlderComments;
   /** Highest event seq applied. */
   seq: number;
 }
@@ -21,6 +31,7 @@ export function stateFromSnapshot(s: BoardSnapshot): BoardState {
     columns: byId(s.columns),
     cards: byId(s.cards),
     comments: byId(s.comments),
+    olderComments: s.olderComments ?? {},
     seq: s.seq,
   };
 }
@@ -51,6 +62,7 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
       );
       next.cards = Object.fromEntries(Object.entries(state.cards).filter(([id]) => !doomed.has(id)));
       next.comments = Object.fromEntries(Object.entries(state.comments).filter(([, c]) => !doomed.has(c.cardId)));
+      next.olderComments = Object.fromEntries(Object.entries(state.olderComments).filter(([id]) => !doomed.has(id)));
       break;
     }
     case 'card.created':
@@ -62,10 +74,16 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
       const { [e.cardId]: _removed, ...cards } = state.cards;
       next.cards = cards;
       next.comments = Object.fromEntries(Object.entries(state.comments).filter(([, c]) => c.cardId !== e.cardId));
+      const { [e.cardId]: _older, ...olderComments } = state.olderComments;
+      next.olderComments = olderComments;
       break;
     }
     case 'comment.added':
+      next.comments = { ...state.comments, [e.comment.id]: e.comment };
+      break;
     case 'comment.updated':
+      // An edit to a comment we have not loaded (it is among a card's older ones) arrives when that page is loaded.
+      if (!state.comments[e.comment.id] && state.olderComments[e.comment.cardId]) break;
       next.comments = { ...state.comments, [e.comment.id]: e.comment };
       break;
     case 'comment.deleted': {
@@ -75,6 +93,25 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
     }
   }
   return next;
+}
+
+/**
+ * Adds a page of a card's older comments (already loaded from the server). Comments we already hold keep their
+ * live version. `nextCursor` is the cursor for the page before this one, or null when this was the oldest.
+ */
+export function mergeOlderComments(
+  state: BoardState,
+  cardId: string,
+  page: readonly Comment[],
+  nextCursor: string | null,
+): BoardState {
+  const comments = { ...state.comments };
+  for (const c of page) if (!comments[c.id] && c.cardId === cardId) comments[c.id] = c;
+  const { [cardId]: previous, ...others } = state.olderComments;
+  const olderComments = nextCursor
+    ? { ...others, [cardId]: { count: Math.max(0, (previous?.count ?? 0) - page.length), cursor: nextCursor } }
+    : others;
+  return { ...state, comments, olderComments };
 }
 
 export function applyEvents(state: BoardState, events: readonly BoardEvent[]): BoardState {

@@ -215,7 +215,7 @@ export function Column({
                   card={card}
                   dragging={isDragged}
                   readOnly={readOnly || filter !== null}
-                  commentCount={selectComments(state, card.id).length}
+                  commentCount={selectComments(state, card.id).length + (state.olderComments[card.id]?.count ?? 0)}
                   editors={editorsByCard.get(card.id) ?? []}
                   members={members}
                   onOpen={() => onOpenCard(card.id)}

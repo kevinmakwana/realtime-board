@@ -42,7 +42,9 @@ describe('board rename and delete', () => {
       await expect.poll(() => seen.length, { timeout: 5000 }).toBe(1);
       expect(seen[0]).toMatchObject({ type: 'board.renamed', name: 'Q4 launch', actorId: ada.id });
       expect((await world.service.getSnapshot(snap.board.id))?.board.name).toBe('Q4 launch');
-      expect((await world.service.listBoards(grace.id)).find((x) => x.id === snap.board.id)?.name).toBe('Q4 launch');
+      expect((await world.service.listBoards(grace.id)).boards.find((x) => x.id === snap.board.id)?.name).toBe(
+        'Q4 launch',
+      );
     });
 
     it('writes nothing when the name is unchanged', async () => {
@@ -124,7 +126,7 @@ describe('board rename and delete', () => {
       }
       expect(await join(sg, snap.board.id)).toMatchObject({ ok: false, code: 'NOT_FOUND' });
       expect((await rest(a.port, grace.token, 'GET', `/api/boards/${snap.board.id}`)).status).toBe(404);
-      expect((await world.service.listBoards(ada.id)).map((x) => x.id)).not.toContain(snap.board.id);
+      expect((await world.service.listBoards(ada.id)).boards.map((x) => x.id)).not.toContain(snap.board.id);
     });
 
     it('is owner-only: 403 for an editor, 404 for a stranger, 404 the second time', async () => {

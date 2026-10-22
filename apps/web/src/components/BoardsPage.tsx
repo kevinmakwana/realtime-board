@@ -5,15 +5,35 @@ import { navigate } from '../router';
 
 export function BoardsPage({ session }: { session: Session }) {
   const [boards, setBoards] = useState<BoardWithRole[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
     api
       .listBoards()
-      .then((r) => setBoards(r.boards))
+      .then((r) => {
+        setBoards(r.boards);
+        setNextCursor(r.nextCursor);
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Could not load boards'));
   }, []);
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const r = await api.listBoards(nextCursor);
+      setBoards((current) => [...(current ?? []), ...r.boards]);
+      setNextCursor(r.nextCursor);
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load more boards');
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   async function create(ev: React.FormEvent) {
     ev.preventDefault();
@@ -78,6 +98,11 @@ export function BoardsPage({ session }: { session: Session }) {
             </li>
           ))}
         </ul>
+        {nextCursor && (
+          <button type="button" className="btn load-more" disabled={loadingMore} onClick={loadMore}>
+            {loadingMore ? 'Loading…' : 'Load more boards'}
+          </button>
+        )}
       </main>
     </div>
   );
