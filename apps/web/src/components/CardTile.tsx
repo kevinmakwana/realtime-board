@@ -1,5 +1,6 @@
 import type { Card, Member } from '@board/shared';
 import { dueStatus, formatDue, labelHue } from '../lib/cardMeta';
+import type { Direction } from '../lib/moves';
 
 interface Props {
   card: Card;
@@ -9,9 +10,21 @@ interface Props {
   editors: { name: string; color: string }[];
   members: Map<string, Member>;
   onOpen: () => void;
+  /** Alt+arrow keys: move the card one step. */
+  onMove: (dir: Direction) => void;
   onDragStart: () => void;
   onDragEnd: () => void;
 }
+
+/** The element that explains the Alt+arrow shortcuts; rendered once by the board. */
+export const MOVE_HELP_ID = 'move-help';
+
+const ARROWS: Record<string, Direction | undefined> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'left',
+  ArrowRight: 'right',
+};
 
 export function CardTile({
   card,
@@ -21,6 +34,7 @@ export function CardTile({
   editors,
   members,
   onOpen,
+  onMove,
   onDragStart,
   onDragEnd,
 }: Props) {
@@ -35,7 +49,14 @@ export function CardTile({
       tabIndex={0}
       style={editing ? ({ '--editor': editing.color } as React.CSSProperties) : undefined}
       onClick={onOpen}
+      aria-describedby={readOnly ? undefined : MOVE_HELP_ID}
       onKeyDown={(e) => {
+        const dir = e.altKey ? ARROWS[e.key] : undefined;
+        if (dir) {
+          e.preventDefault();
+          if (!readOnly) onMove(dir);
+          return;
+        }
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           onOpen();

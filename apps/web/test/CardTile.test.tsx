@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { CardTile } from '../src/components/CardTile';
@@ -23,6 +23,7 @@ function setup(card = makeCard(1), over: Partial<Parameters<typeof CardTile>[0]>
       [GRACE, grace],
     ]),
     onOpen: vi.fn(),
+    onMove: vi.fn(),
     onDragStart: vi.fn(),
     onDragEnd: vi.fn(),
     ...over,
@@ -88,6 +89,38 @@ describe('CardTile', () => {
   it('is not draggable for a viewer', () => {
     setup(makeCard(1), { readOnly: true });
     expect(screen.getByTestId('card')).toHaveAttribute('draggable', 'false');
+  });
+
+  it.each([
+    ['{Alt>}{ArrowUp}{/Alt}', 'up'],
+    ['{Alt>}{ArrowDown}{/Alt}', 'down'],
+    ['{Alt>}{ArrowLeft}{/Alt}', 'left'],
+    ['{Alt>}{ArrowRight}{/Alt}', 'right'],
+  ])('asks to move %s with Alt+arrow', async (keys, dir) => {
+    const user = userEvent.setup();
+    const { onMove, onOpen } = setup();
+    screen.getByTestId('card').focus();
+    await user.keyboard(keys);
+    expect(onMove).toHaveBeenCalledWith(dir);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it('ignores plain arrow keys, and Alt+arrows for a viewer', async () => {
+    const user = userEvent.setup();
+    const first = setup();
+    screen.getByTestId('card').focus();
+    await user.keyboard('{ArrowDown}');
+    expect(first.onMove).not.toHaveBeenCalled();
+    cleanup();
+    const viewer = setup(makeCard(1), { readOnly: true });
+    screen.getByTestId('card').focus();
+    await user.keyboard('{Alt>}{ArrowDown}{/Alt}');
+    expect(viewer.onMove).not.toHaveBeenCalled();
+  });
+
+  it('points editors at the shortcut help', () => {
+    setup();
+    expect(screen.getByTestId('card')).toHaveAttribute('aria-describedby', 'move-help');
   });
 
   it('says who else is editing it', () => {

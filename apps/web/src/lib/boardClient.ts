@@ -301,14 +301,14 @@ export class BoardClient {
     chainKey: string,
     send: () => Promise<Ack<Record<string, unknown>>>,
     cardId?: string,
-  ): void {
+  ): boolean {
     if (!this.joined || !this.auth) {
       this.notice('error', 'You are offline, so that change was not saved. Try again once you are reconnected.');
-      return;
+      return false;
     }
     if (this.model.role === 'viewer') {
       this.notice('error', 'You have view-only access to this board.');
-      return;
+      return false;
     }
     const entry: PendingEntry = { id: this.nextId++, op };
     this.pending.push(entry);
@@ -322,6 +322,7 @@ export class BoardClient {
       }
     };
     this.chains.set(chainKey, (this.chains.get(chainKey) ?? Promise.resolve()).then(run));
+    return true;
   }
 
   private settle(entry: PendingEntry, ack: Ack<Record<string, unknown>>, cardId?: string): void {
@@ -408,12 +409,15 @@ export class BoardClient {
     );
   }
 
-  /** Move to `index` within `columnId` (index counts the column's cards without the moved one). */
-  moveCard(id: string, columnId: string, index: number): void {
+  /**
+   * Move to `index` within `columnId` (index counts the column's cards without the moved one).
+   * Returns false when the move was refused outright (offline, view-only), so callers do not announce it.
+   */
+  moveCard(id: string, columnId: string, index: number): boolean {
     const state = this.view();
     const siblings = selectCards(state, columnId).filter((c) => c.id !== id);
     const position = keyForIndex(siblings, index);
-    this.submit(
+    return this.submit(
       { kind: 'card.move', id, columnId, position },
       id,
       () =>
@@ -463,15 +467,15 @@ export class BoardClient {
     );
   }
 
-  /** Move to `index` among the other columns (the count does not include the moved one). */
-  moveColumn(id: string, index: number): void {
+  /** Move to `index` among the other columns (the count does not include the moved one). False if nothing was sent. */
+  moveColumn(id: string, index: number): boolean {
     const columns = selectColumns(this.view());
     const from = columns.findIndex((c) => c.id === id);
-    if (from === -1) return;
+    if (from === -1) return false;
     const others = columns.filter((c) => c.id !== id);
-    if (from === Math.max(0, Math.min(index, others.length))) return; // dropped where it already is
+    if (from === Math.max(0, Math.min(index, others.length))) return false; // dropped where it already is
     const position = keyForIndex(others, index);
-    this.submit({ kind: 'column.move', id, position }, 'board', () =>
+    return this.submit({ kind: 'column.move', id, position }, 'board', () =>
       this.emitAck('column:move', { id, boardId: this.boardId, position }),
     );
   }

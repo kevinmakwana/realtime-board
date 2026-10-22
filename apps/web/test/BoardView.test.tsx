@@ -1,11 +1,23 @@
+import { useMemo, useState } from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Role } from '@board/shared';
+import { keyForIndex, selectCards, selectColumns, type BoardState, type Role } from '@board/shared';
 import { api } from '../src/api';
 import { BoardView } from '../src/components/BoardView';
 import type { BoardViewModel } from '../src/lib/boardClient';
-import { ada, ADA, fakeClient, grace, GRACE, makeCard, makeComment, makeState } from './componentHelpers';
+import {
+  ada,
+  ADA,
+  COL_DONE,
+  COL_TODO,
+  fakeClient,
+  grace,
+  GRACE,
+  makeCard,
+  makeComment,
+  makeState,
+} from './componentHelpers';
 
 vi.mock('../src/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/api')>()),
@@ -199,5 +211,148 @@ describe('BoardView', () => {
     const after = makeState([]);
     rerender(<BoardView client={client} vm={vm(after)} state={after} session={session} />);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+});
+
+describe('BoardView keyboard and screen-reader support', () => {
+  it('moves the focused card with Alt+arrows, announces where it went and keeps it focused', async () => {
+    const user = userEvent.setup();
+    const { client, cards } = setup();
+    screen.getByText('Write release notes').closest<HTMLElement>('[data-testid=card]')?.focus();
+
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}');
+    expect(client.moveCard).toHaveBeenLastCalledWith(cards[1]?.id, COL_TODO, 0);
+    expect(screen.getByTestId('move-announcement')).toHaveTextContent(
+      'Moved “Write release notes” to To do, position 1 of 3',
+    );
+
+    await user.keyboard('{Alt>}{ArrowRight}{/Alt}');
+    expect(client.moveCard).toHaveBeenLastCalledWith(cards[1]?.id, COL_DONE, 0);
+    expect(screen.getByTestId('move-announcement')).toHaveTextContent(
+      'Moved “Write release notes” to Done, position 1 of 1',
+    );
+  });
+
+  it('does nothing at the edge of the board', async () => {
+    const user = userEvent.setup();
+    const { client } = setup();
+    screen.getByText('Fix login redirect').closest<HTMLElement>('[data-testid=card]')?.focus();
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}{Alt>}{ArrowLeft}{/Alt}');
+    expect(client.moveCard).not.toHaveBeenCalled();
+    expect(screen.getByTestId('move-announcement')).toBeEmptyDOMElement();
+  });
+
+  it('moves a column from its header buttons and keeps focus on the button', async () => {
+    const user = userEvent.setup();
+    const { client } = setup();
+    await user.click(screen.getByRole('button', { name: 'Move column To do right' }));
+    expect(client.moveColumn).toHaveBeenCalledWith(COL_TODO, 1);
+    expect(screen.getByTestId('move-announcement')).toHaveTextContent('Moved column “To do” to position 2 of 2');
+    expect(screen.getByRole('button', { name: 'Move column To do right' })).toHaveFocus();
+  });
+
+  it('describes the shortcut once for assistive technology', () => {
+    setup();
+    expect(document.getElementById('move-help')).toHaveTextContent('Alt with the arrow keys');
+  });
+
+  it('puts focus in the card dialog, keeps Tab inside it, and gives focus back to the card on Escape', async () => {
+    const user = userEvent.setup();
+    setup();
+    const tile = screen.getByText('Fix login redirect').closest<HTMLElement>('[data-testid=card]')!;
+    tile.focus();
+    await user.keyboard('{Enter}');
+    const dialog = screen.getByRole('dialog', { name: 'Card details' });
+    expect(dialog).toHaveFocus();
+
+    await user.tab({ shift: true }); // from the dialog itself back to the last control
+    expect(within(dialog).getByRole('button', { name: 'Done' })).toHaveFocus();
+    await user.tab(); // and forward again wraps to the first
+    expect(within(dialog).getAllByRole('button', { name: 'Close' })[0]).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(tile).toHaveFocus();
+  });
+});
+
+/** A board whose fake client really applies moves, so the DOM reorders the way it does for a person. */
+function LiveBoard() {
+  const [state, setState] = useState<BoardState>(() =>
+    makeState([makeCard(1, { title: 'One' }), makeCard(2, { title: 'Two' }), makeCard(3, { title: 'Three' })]),
+  );
+  const client = useMemo(() => {
+    const c = fakeClient();
+    c.moveCard.mockImplementation((id: string, columnId: string, index: number) => {
+      setState((s) => {
+        const others = selectCards(s, columnId).filter((x) => x.id !== id);
+        const card = { ...s.cards[id]!, columnId, position: keyForIndex(others, index) };
+        return { ...s, cards: { ...s.cards, [id]: card } };
+      });
+      return true;
+    });
+    c.moveColumn.mockImplementation((id: string, index: number) => {
+      setState((s) => {
+        const others = selectColumns(s).filter((x) => x.id !== id);
+        return { ...s, columns: { ...s.columns, [id]: { ...s.columns[id]!, position: keyForIndex(others, index) } } };
+      });
+      return true;
+    });
+    return c;
+  }, []);
+  const vm: BoardViewModel = {
+    status: 'live',
+    instance: 'a',
+    state,
+    presence: [],
+    cursors: [],
+    selfSocketId: 's1',
+    role: 'owner',
+  };
+  return <BoardView client={client} vm={vm} state={state} session={session} />;
+}
+
+describe('focus after a keyboard move, on a board that really reorders', () => {
+  it('keeps focus on a card that moved to another column', async () => {
+    const user = userEvent.setup();
+    render(<LiveBoard />);
+    screen.getByText('Two').closest<HTMLElement>('[data-testid=card]')?.focus();
+    await user.keyboard('{Alt>}{ArrowRight}{/Alt}');
+    const done = screen.getByTestId('cards-Done');
+    const moved = within(done).getByText('Two').closest<HTMLElement>('[data-testid=card]');
+    expect(moved).toHaveFocus();
+    await user.keyboard('{Alt>}{ArrowLeft}{/Alt}');
+    expect(screen.getByText('Two').closest('[data-testid=card]')).toHaveFocus();
+  });
+
+  it('keeps focus on a button of the column after it moved', async () => {
+    const user = userEvent.setup();
+    render(<LiveBoard />);
+    await user.click(screen.getByRole('button', { name: 'Move column To do right' }));
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Done', 'To do']);
+    // "To do" is now last, so its right button is disabled and focus lands on the left one.
+    expect(screen.getByRole('button', { name: 'Move column To do right' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Move column To do left' })).toHaveFocus();
+  });
+
+  it('falls back to the other arrow when the column reaches the end', async () => {
+    const user = userEvent.setup();
+    render(<LiveBoard />);
+    await user.click(screen.getByRole('button', { name: 'Move column Done left' }));
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Done', 'To do']);
+    // "Done" is now first: its left button is disabled, so focus lands on the right one.
+    expect(screen.getByRole('button', { name: 'Move column Done right' })).toHaveFocus();
+  });
+});
+
+describe('a move the client refuses', () => {
+  it('is not announced as done', async () => {
+    const user = userEvent.setup();
+    const { client } = setup();
+    client.moveCard.mockReturnValue(false);
+    screen.getByText('Write release notes').closest<HTMLElement>('[data-testid=card]')?.focus();
+    await user.keyboard('{Alt>}{ArrowUp}{/Alt}');
+    expect(client.moveCard).toHaveBeenCalled();
+    expect(screen.getByTestId('move-announcement')).toBeEmptyDOMElement();
   });
 });

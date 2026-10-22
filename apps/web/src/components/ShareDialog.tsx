@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { GrantableRole, Invite, Member, Role } from '@board/shared';
 import { api } from '../api';
+import { useDialogFocus } from '../lib/useDialogFocus';
 import { navigate } from '../router';
 
 interface Props {
@@ -19,6 +20,7 @@ export function ShareDialog({ boardId, role, selfUserId, onClose }: Props) {
   const [email, setEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<GrantableRole>('editor');
   const isOwner = role === 'owner';
+  const dialogRef = useDialogFocus<HTMLDivElement>();
 
   const load = useCallback(async () => {
     try {
@@ -76,7 +78,14 @@ export function ShareDialog({ boardId, role, selfUserId, onClose }: Props) {
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: backdrop click is a mouse shortcut; keyboard users close with Escape
     <div className="scrim" role="presentation" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal share" role="dialog" aria-modal="true" aria-label="Share board">
+      <div
+        className="modal share"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Share board"
+        tabIndex={-1}
+        ref={dialogRef}
+      >
         <header className="modal-head">
           <h2>Share this board</h2>
           <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>

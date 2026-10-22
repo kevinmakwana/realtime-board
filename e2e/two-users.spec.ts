@@ -79,7 +79,7 @@ test('two users on different server instances see each other live', async ({ bro
       /Ada Lovelace is editing/,
     );
     await ada.getByLabel('Description').fill('Compare with the three competitors.');
-    await ada.getByRole('button', { name: 'Done', exact: true }).click();
+    await ada.getByRole('dialog').getByRole('button', { name: 'Done', exact: true }).click();
     await expect(card(grace, 'Review pricing page').getByTestId('editing-indicator')).toHaveCount(0);
     await expect(card(grace, 'Review pricing page')).toContainText('Description');
   });
@@ -88,7 +88,7 @@ test('two users on different server instances see each other live', async ({ bro
     await card(grace, 'Review pricing page').click();
     await grace.getByLabel('Write a comment').fill('Looks good to me');
     await grace.getByRole('button', { name: 'Comment' }).click();
-    await grace.getByRole('button', { name: 'Done', exact: true }).click();
+    await grace.getByRole('dialog').getByRole('button', { name: 'Done', exact: true }).click();
     await expect(card(ada, 'Review pricing page')).toContainText('1 comment');
   });
 

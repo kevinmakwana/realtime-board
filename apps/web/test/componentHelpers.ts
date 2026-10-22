@@ -84,6 +84,8 @@ export function fakeClient() {
     ReturnType<typeof vi.fn>
   >;
   const notices = new Set<(n: { kind: 'error' | 'info'; message: string }) => void>();
+  client.moveCard.mockReturnValue(true);
+  client.moveColumn.mockReturnValue(true);
   const extra = {
     onNotice: (fn: (n: { kind: 'error' | 'info'; message: string }) => void) => {
       notices.add(fn);
