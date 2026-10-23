@@ -29,6 +29,6 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/pg": "^8.23.1",
     "socket.io-client": "^4.8.4",
-    "tsup": "^8.5.1"
+    "tsup": "^9.0.0"
   }
 }
