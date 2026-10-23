@@ -24,6 +24,7 @@
     "test:unit": "vitest run --project unit --project components",
     "test:integration": "vitest run --project integration",
     "test:e2e": "playwright test",
+    "loadtest": "k6 run loadtest/board.js",
     "infra:up": "docker compose up -d --wait postgres redis",
     "infra:down": "docker compose down",
     "seed": "npm run seed -w apps/server",

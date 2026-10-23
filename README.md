@@ -85,7 +85,7 @@ Open two windows:
 
 The badge in the header shows which instance each window is on. Without `?node=`, nginx spreads tabs across instances by a per-tab id (see [Scaling notes](#scaling-notes)).
 
-Host ports are configurable: `POSTGRES_PORT`, `REDIS_PORT`, `NGINX_PORT` (see [`.env.example`](.env.example)).
+To run published images instead of building them, see the [deploy guide](docs/deploy.md). Host ports are configurable: `POSTGRES_PORT`, `REDIS_PORT`, `NGINX_PORT` (see [`.env.example`](.env.example)).
 
 ### Tests
 
@@ -97,6 +97,7 @@ npm run test:integration     # needs `npm run infra:up`; starts TWO server insta
 npx playwright install chromium
 npm run test:e2e             # two browser contexts on two instances edit the same board
 npm run demo:gif             # re-record docs/demo.gif against the scale profile
+npm run loadtest             # k6 against the scale profile; see docs/load-testing.md
 ```
 
 | Layer | What it proves |
@@ -194,7 +195,8 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 - **HTTP hardening.** `/api/auth/*` is rate limited per client IP, and magic links are also limited per email address. Both limiters count in Redis, so the budget is shared by every instance, and they fail open if Redis is unreachable. Helmet sets the standard security headers. Set `TRUST_PROXY` to the number of proxies in front of the server (the compose profile uses 1); leaving it at 0 means a spoofed `X-Forwarded-For` cannot dodge a limit.
 - **Throttling on the client.** Cursor packets go out at most every 50 ms and always end on the latest position.
 - **Access control.** Every command re-reads the actor's role inside the same board-locked transaction that writes the event, so a removal or downgrade that has committed is always seen by the next write. Live sockets learn about the change through `io.serverSideEmit` (delivered by the Redis adapter), and a removed socket leaves the board room and the presence roster. Non-members get the same answer as for a board that does not exist, so ids do not leak.
-- **Known limits.** The event log is never compacted. Comments are loaded with the snapshot, which is fine for small boards but would need paging for large ones.
+- **Capacity.** In our [load test](docs/load-testing.md) (100 users, 10 boards, about 200 commands/s, both instances, on one laptop) p95 acknowledgement was 21 to 72 ms and fan-out to a socket on the other instance p95 24 to 75 ms, with no lost, duplicated or refused events. See that page for what it does and does not show.
+- **Known limits.** `count` of unloaded comments is a hint, and a full re-snapshot forgets older comment pages loaded before it.
 
 ## Project layout
 
@@ -214,6 +216,7 @@ docker/         nginx config for the scale profile
 | `INSTANCE_ID` | `server-1` | Shown in the UI and `/health` |
 | `DATABASE_URL` | `postgres://board:board@localhost:5434/board` | |
 | `REDIS_URL` | `redis://localhost:6381` | |
+| `PG_POOL_MAX` | `10` | Postgres connections per instance; every write holds one for its transaction. Keep instances × this below Postgres' `max_connections` |
 | `JWT_SECRET` | `dev-only-change-me` | The server refuses to start with this value when `NODE_ENV=production` |
 | `COMPOSE_JWT_SECRET` | demo value | Compose only: the secret used by the `scale` profile (it runs with `NODE_ENV=production`) |
 | `TRUST_PROXY` | `0` | Number of reverse proxies in front of the server (nginx = 1). Needed for per-client rate limits to see real IPs |

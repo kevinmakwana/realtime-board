@@ -1,0 +1,89 @@
+name: realtime-board
+
+# Production-shaped stack from the images CI publishes to GitHub Container Registry: Postgres, Redis, two API
+# instances, and nginx serving the web app and balancing sockets. See docs/deploy.md.
+#
+#   cp deploy/.env.example deploy/.env      # then edit it
+#   docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --wait
+#
+# nginx listens on plain HTTP on the loopback address: put TLS in front of it (Caddy on the same host, or set
+# HTTP_BIND for a load balancer elsewhere). TRUST_PROXY defaults to 2 for that shape.
+# The nginx config of the web image names its upstreams server-1 and server-2, so keep those service names.
+
+x-server: &server
+  image: ${IMAGE_PREFIX:-ghcr.io/kevinmakwana/realtime-board}-server:${IMAGE_TAG:-latest}
+  restart: unless-stopped
+  environment: &server-env
+    NODE_ENV: production # the image sets it too; JWT_SECRET must then be private, and dev sign-in is off
+    PORT: "3001"
+    DATABASE_URL: postgres://board:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/board
+    REDIS_URL: redis://redis:6379
+    JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in deploy/.env (openssl rand -base64 48)}
+    WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN in deploy/.env (the public URL, e.g. https://board.example.com)}
+    TRUST_PROXY: ${TRUST_PROXY:-2} # nginx plus the TLS terminator in front of it; use 1 if nothing is in front
+    SMTP_URL: ${SMTP_URL:-}
+    MAIL_FROM: ${MAIL_FROM:-Realtime Board <no-reply@localhost>}
+    PG_POOL_MAX: ${PG_POOL_MAX:-10}
+    EVENT_RETENTION_DAYS: ${EVENT_RETENTION_DAYS:-90}
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://localhost:3001/ready"]
+    interval: 10s
+    timeout: 3s
+    retries: 6
+    start_period: 20s
+
+services:
+  server-1:
+    <<: *server
+    environment:
+      <<: *server-env
+      INSTANCE_ID: server-1
+
+  server-2:
+    <<: *server
+    environment:
+      <<: *server-env
+      INSTANCE_ID: server-2
+
+  web:
+    image: ${IMAGE_PREFIX:-ghcr.io/kevinmakwana/realtime-board}-web:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      # Loopback by default: TLS terminates in front of nginx. If the terminator is on another host, set HTTP_BIND
+      # to this host's private address and firewall the port: anything that can reach it directly can forge its IP.
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-80}:80"
+    depends_on:
+      server-1: { condition: service_healthy }
+      server-2: { condition: service_healthy }
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: board
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: board
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U board -d board"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis only carries fan-out, presence and rate-limit counters; nothing in it needs to survive a restart.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

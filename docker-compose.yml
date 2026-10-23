@@ -15,11 +15,13 @@ x-server: &server
     # The image runs with NODE_ENV=production, which refuses the public dev secret. A separate variable name
     # keeps the dev JWT_SECRET from your .env out of this profile. Set COMPOSE_JWT_SECRET for anything shared.
     JWT_SECRET: ${COMPOSE_JWT_SECRET:-compose-demo-secret-do-not-use-in-prod}
+    PG_POOL_MAX: ${PG_POOL_MAX:-10}
     TRUST_PROXY: "1" # nginx is the one proxy in front of the instances
     SMTP_URL: ${SMTP_URL:-} # unset: emails are printed to the container log
     MAIL_FROM: ${MAIL_FROM:-Realtime Board <no-reply@localhost>}
     WEB_ORIGIN: http://localhost:${NGINX_PORT:-8088}
     AUTH_DEV_LOGIN: "true" # demo only: lets the sign-in page offer one-click fictional personas
+    AUTH_RATE_LIMIT_PER_MIN: ${AUTH_RATE_LIMIT_PER_MIN:-20} # raise for `npm run loadtest`: it signs in many users from one IP
   depends_on:
     postgres: { condition: service_healthy }
     redis: { condition: service_healthy }

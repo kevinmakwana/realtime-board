@@ -38,6 +38,12 @@ describe('loadConfig retention and presence settings', () => {
     expect(loadConfig({ EVENT_RETENTION_MIN_EVENTS: '500' }).EVENT_RETENTION_MIN_EVENTS).toBe(500);
   });
 
+  it('sizes the Postgres pool, with a floor so a write and a read can both get a connection', () => {
+    expect(loadConfig({}).PG_POOL_MAX).toBe(10);
+    expect(loadConfig({ PG_POOL_MAX: '40' }).PG_POOL_MAX).toBe(40);
+    expect(() => loadConfig({ PG_POOL_MAX: '1' })).toThrow();
+  });
+
   it('rejects nonsense values', () => {
     expect(() => loadConfig({ EVENT_RETENTION_DAYS: '-1' })).toThrow();
     expect(() => loadConfig({ PRESENCE_BROADCAST_MIN_MS: 'fast' })).toThrow();

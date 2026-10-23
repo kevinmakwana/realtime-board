@@ -61,8 +61,9 @@
   - Also fixed: Activity/Share buttons had white text on a white background, and the assignee checkboxes were stretched to full width
   - Verified: unit (moves, tile, column, modal, board, axe), e2e `keyboard.spec.ts` across two instances
 - [ ] **Offline command queue** - real queue and replay, if wanted after the copy fix
-- [ ] **CD, image publish, deploy guide** - publish images from CI; add docs for a production deploy
-  - Priority 18 (I3 R3 E3)
+- [x] ~~**CD, image publish, deploy guide**~~ (2026-10-24)
+  - `publish` job in CI: after test, e2e, scale-profile and deploy-config pass on `main` or a `v*` tag, builds `server` and `web` for amd64 + arm64 and pushes them to GHCR (`latest`, `sha-*`, semver tags; pull requests never publish). `deploy/docker-compose.prod.yml` (secrets required, no dev sign-in, `TRUST_PROXY`) and `docs/deploy.md`; CI validates the compose file
+  - Not done: an automatic deploy step, image signing; first publish may need the package made public by hand. Publishing itself can only be verified on the first run on `main`
 - [x] ~~**Paging for boards and comments; throttle presence rebroadcasts**~~ (2026-10-22)
   - Boards: keyset cursor (`created_at`, `id`; full microsecond text, so ties and precision are safe), `?limit=&before=`, `nextCursor`; the boards page has "Load more boards". Comments: the snapshot sends the newest 50 per card with `olderComments {count, cursor}`, `GET .../cards/:cardId/comments?before=`, a pure `mergeOlderComments`, "Show earlier comments" in the card dialog; an edit to an unloaded comment is ignored by the reducer until it is loaded. Presence: `setEditing` is one atomic Lua script (a test reproduced a left member being revived), and "is editing" broadcasts are throttled per board (`PRESENCE_BROADCAST_MIN_MS`, leading edge plus a final one)
   - Known limit: `count` is a hint and is not reduced when an unloaded comment is deleted live; a full re-snapshot forgets pages loaded earlier
@@ -70,7 +71,9 @@
 - [x] ~~**Event-log retention or compaction**~~ (2026-10-22)
   - `Retention` job (advisory-lock so one instance at a time, batched deletes, migration 5 adds an index on `created_at`): deletes events older than `EVENT_RETENTION_DAYS` (90) but always keeps a board's newest `EVENT_RETENTION_MIN_EVENTS` (1000, minimum 500 = replay window and activity lookback). No separate snapshot step is needed because the entity tables are the snapshot; a client behind the pruned range gets a snapshot on join, and `GET /events` answers 410. `board_events_pruned_total` metric
   - Verified: 10 integration tests (keeps newest N, recent events, batches, off switch, lock, gapless numbering after a prune, replay vs snapshot, 410, activity)
-- [ ] **Load test** - k6 or artillery against the scale profile to back the README scaling claims
+- [x] ~~**Load test**~~ (2026-10-24)
+  - `loadtest/board.js` (k6, Socket.IO over WebSocket): zero-tolerance thresholds on lost/duplicate/refused events and log gaps, p95 limits on ack and cross-instance fan-out; CI runs a 10-user smoke; `docs/load-testing.md` has 3 reference runs (100 users, ~200 commands/s, p95 21 to 72 ms, laptop with everything on one machine). Added `PG_POOL_MAX` config on the way; `AUTH_RATE_LIMIT_PER_MIN` is passed through compose
+  - Found: each Node instance saturates about one core at ~150 commands/s; Postgres is close behind; correctness held even saturated
 - [ ] **Consider websocket-only transport** - would remove the nginx sticky-session hashing, at the cost of no polling fallback
 
 ## Waiting On

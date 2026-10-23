@@ -3,7 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -94,6 +98,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build and start 2 instances behind nginx
+        env:
+          AUTH_RATE_LIMIT_PER_MIN: "10000" # the load test below signs in many users from one IP
         run: docker compose --profile scale up -d --build --wait
       - name: Both instances serve traffic through nginx
         run: |
@@ -105,6 +111,80 @@ jobs:
             curl -fsS "http://localhost:8088/socket.io/?EIO=4&transport=polling&cid=ci-$node&node=$node" | grep -q '"sid"'
           done
           curl -fsS http://localhost:8088/ | grep -q "Realtime Board"
+      - uses: grafana/setup-k6-action@v1.2.2
+        with:
+          k6-version: 2.3.0 # the script uses k6/ws; bump on purpose
+      - name: Load test smoke (10 users for 10 s; fails on any lost, repeated or refused event)
+        run: VUS=10 BOARDS=1 DURATION=10 RAMP=2 ACK_P95_MS=3000 FANOUT_P95_MS=3000 k6 run loadtest/board.js
       - name: Logs on failure
         if: failure()
         run: docker compose --profile scale logs --no-color
+
+  deploy-config:
+    name: Production compose file is valid
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: docker compose config (with the example env file filled in)
+        env:
+          JWT_SECRET: ci-only-not-a-secret
+          POSTGRES_PASSWORD: ci-only
+        run: docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.example config --quiet
+      - name: Each required setting is enforced (no insecure defaults)
+        run: |
+          set -u
+          export JWT_SECRET=ci-only WEB_ORIGIN=https://board.example.com POSTGRES_PASSWORD=ci-only
+          for var in JWT_SECRET WEB_ORIGIN POSTGRES_PASSWORD; do
+            if env -u "$var" docker compose -f deploy/docker-compose.prod.yml config --quiet 2>/dev/null; then
+              echo "compose accepted a missing $var" >&2; exit 1
+            fi
+          done
+
+  # Pushes the two images (API server and nginx + web app) to GitHub Container Registry once everything above is
+  # green, on main and on version tags. Pull requests never publish.
+  publish:
+    name: Publish ${{ matrix.image }} image
+    needs: [test, e2e, scale-profile, deploy-config]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: server
+            target: server
+          - image: web
+            target: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v4.4.0
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6.2.0
+        with:
+          # metadata-action lowercases the name; GHCR requires it.
+          images: ghcr.io/${{ github.repository }}-${{ matrix.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,scope=${{ matrix.image }},mode=max

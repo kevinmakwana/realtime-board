@@ -11,6 +11,8 @@ const schema = z.object({
   INSTANCE_ID: z.string().default('server-1'),
   DATABASE_URL: z.string().default('postgres://board:board@localhost:5434/board'),
   REDIS_URL: z.string().default('redis://localhost:6381'),
+  /** Postgres connections this instance may hold. Every write holds one for its whole transaction. */
+  PG_POOL_MAX: z.coerce.number().int().min(2).max(500).default(10),
   JWT_SECRET: z.string().min(8).default(DEV_JWT_SECRET),
   /** How many reverse proxies sit in front of this server (nginx = 1). 0 ignores X-Forwarded-For. */
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),

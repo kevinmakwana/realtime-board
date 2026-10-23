@@ -34,7 +34,7 @@ export async function createServerInstance(
   log: Logger = noopLogger,
   deps: { mailer?: Mailer } = {},
 ): Promise<ServerInstance> {
-  const pool = createPool(config.DATABASE_URL);
+  const pool = createPool(config.DATABASE_URL, config.PG_POOL_MAX);
   await migrate(pool);
 
   const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
