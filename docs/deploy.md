@@ -23,7 +23,7 @@ Both are built for `linux/amd64` and `linux/arm64`. Tags: `latest` (main), `sha-
 cp deploy/.env.example deploy/.env
 # edit deploy/.env: WEB_ORIGIN, JWT_SECRET (openssl rand -base64 48), POSTGRES_PASSWORD (openssl rand -hex 24)
 docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --wait
-curl -fsS http://localhost/ready          # {"ok":true,...}
+curl -fsS http://127.0.0.1/ready          # {"ok":true,...}  (nginx listens on loopback only; see below)
 ```
 
 [`deploy/docker-compose.prod.yml`](../deploy/docker-compose.prod.yml) runs Postgres, Redis, two server instances and the web image. Compose refuses to start without `JWT_SECRET`, `POSTGRES_PASSWORD` and `WEB_ORIGIN`; the server itself refuses the public development secret when `NODE_ENV=production`. Database migrations run when a server starts, so an upgrade is `docker compose ... pull && docker compose ... up -d --wait`.
@@ -32,7 +32,9 @@ Dev sign-in (`AUTH_DEV_LOGIN`) is **off** in production, so people sign in with 
 
 ## Behind TLS
 
-Point your TLS terminator at the `web` service (`HTTP_PORT`, default 80) and set `WEB_ORIGIN` to the public `https://` URL. Then set `TRUST_PROXY=2` in `deploy/.env`: nginx is one proxy and the terminator is another, and the server needs the right count to see real client IPs for rate limiting (a wrong count lets clients spoof `X-Forwarded-For`, or puts everyone behind one IP). Whatever sits in front must pass `Upgrade`/`Connection` headers and allow idle connections of at least two minutes.
+nginx is published on `127.0.0.1:80` by default, so the host's public interface does not expose plain HTTP. Point your TLS terminator at it (Caddy on the same host is the simplest) and set `WEB_ORIGIN` to the public `https://` URL. If the terminator is on another machine, set `HTTP_BIND` to this host's private address and **firewall that port to the terminator only**.
+
+`TRUST_PROXY` defaults to `2` here: nginx is one proxy and the terminator is the other, and the server needs the right count to see real client IPs for rate limiting. This is only safe while every request really goes through the terminator. If clients can reach nginx directly, they can forge `X-Forwarded-For` and get a fresh rate-limit bucket per request; with too small a count, everyone shares the terminator's IP and the sign-in limit (20 a minute) applies to the whole site. Whatever sits in front must pass `Upgrade`/`Connection` headers and allow idle connections of at least two minutes.
 
 ## Running on other platforms
 
@@ -47,6 +49,8 @@ Keep these constraints and the rest is up to you:
 
 - `GET /health` is liveness (touches no dependency); `GET /ready` checks Postgres and Redis and returns 503 naming the one that failed. The compose healthchecks use `/ready`.
 - Logs are one JSON object per line.
+- `POSTGRES_PASSWORD` is applied only when the `pgdata` volume is first created. Changing it in `deploy/.env` later makes the servers fail to authenticate; change it inside Postgres (`ALTER USER`) as well.
+- nginx resolves `server-1` and `server-2` once, at startup. After recreating only the server containers, restart `web` (`docker compose ... restart web`); a plain `up -d` after `pull` recreates all of them together, which is fine.
 - `GET /metrics` (Prometheus) is deliberately **not** proxied by nginx. Scrape each server instance on port 3001 from inside the network.
 - Old board events are pruned after `EVENT_RETENTION_DAYS` (default 90); see the README's scaling notes.
 

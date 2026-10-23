@@ -6,6 +6,9 @@ on:
     tags: ["v*"]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -109,8 +112,10 @@ jobs:
           done
           curl -fsS http://localhost:8088/ | grep -q "Realtime Board"
       - uses: grafana/setup-k6-action@v1.2.2
+        with:
+          k6-version: 2.3.0 # the script uses k6/ws; bump on purpose
       - name: Load test smoke (10 users for 10 s; fails on any lost, repeated or refused event)
-        run: VUS=10 BOARDS=2 DURATION=10 RAMP=2 ACK_P95_MS=3000 FANOUT_P95_MS=3000 k6 run loadtest/board.js
+        run: VUS=10 BOARDS=1 DURATION=10 RAMP=2 ACK_P95_MS=3000 FANOUT_P95_MS=3000 k6 run loadtest/board.js
       - name: Logs on failure
         if: failure()
         run: docker compose --profile scale logs --no-color
@@ -125,11 +130,15 @@ jobs:
           JWT_SECRET: ci-only-not-a-secret
           POSTGRES_PASSWORD: ci-only
         run: docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.example config --quiet
-      - name: The secrets are required (no insecure defaults)
+      - name: Each required setting is enforced (no insecure defaults)
         run: |
-          if docker compose -f deploy/docker-compose.prod.yml config --quiet 2>/dev/null; then
-            echo "compose accepted a missing JWT_SECRET / POSTGRES_PASSWORD" >&2; exit 1
-          fi
+          set -u
+          export JWT_SECRET=ci-only WEB_ORIGIN=https://board.example.com POSTGRES_PASSWORD=ci-only
+          for var in JWT_SECRET WEB_ORIGIN POSTGRES_PASSWORD; do
+            if env -u "$var" docker compose -f deploy/docker-compose.prod.yml config --quiet 2>/dev/null; then
+              echo "compose accepted a missing $var" >&2; exit 1
+            fi
+          done
 
   # Pushes the two images (API server and nginx + web app) to GitHub Container Registry once everything above is
   # green, on main and on version tags. Pull requests never publish.
@@ -176,5 +185,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max

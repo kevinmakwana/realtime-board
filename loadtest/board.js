@@ -7,7 +7,7 @@
 // sockets over the server instances by the per-socket `cid`, so most boards have people on both instances.
 // Each user creates cards, moves and comments on its own cards, and wiggles a cursor. What is measured:
 //   - ack_ms        time from sending a command to its acknowledgement
-//   - fanout_ms     time from a card being created until another socket receives the `card.created` event,
+//   - fanout_ms     time from a card being created until a socket on the board (the creator included) receives the `card.created` event,
 //                   tagged cross_instance=true when the creator was on a different server instance
 //   - events_missing / events_duplicate   holes or repeats in the `seq` numbers a socket received
 // and the run fails (non-zero exit) on any lost, repeated or rejected command, or on slow percentiles.
@@ -149,6 +149,7 @@ export default function (data) {
   const pending = new Map(); // ack id -> { command, sentAt, done }
   const myCards = []; // { id, version, moving }
   let sending = false;
+  let finished = false; // set when the planned duration is over; a close before that is a failure
 
   const res = ws.connect(wsUrl, {}, (socket) => {
     const emit = (name, payload, done) => {
@@ -223,6 +224,7 @@ export default function (data) {
         emit('board:join', { boardId: seat.boardId }, (ack) => {
           if (!ack.ok) {
             connectFailures.add(1);
+            finished = true; // already counted
             return socket.close();
           }
           instance = ack.instance;
@@ -240,6 +242,7 @@ export default function (data) {
           socket.setTimeout(() => {
             // Every sequence number between where we joined and the newest one must have arrived.
             for (let s = joinSeq + 1; s < maxSeq; s++) if (!seen.has(s)) eventsMissing.add(1);
+            finished = true;
             socket.close();
           }, DURATION_S * 1000);
         });
@@ -263,6 +266,12 @@ export default function (data) {
         }
         waiting.done?.(ack);
       }
+    });
+    socket.on('close', () => {
+      // A socket that ends before its planned end (dropped, kicked, proxy timeout) is a failed run, and so is any
+      // command that never got an answer.
+      if (!finished) connectFailures.add(1);
+      if (pending.size > 0) opsFailed.add(pending.size);
     });
     socket.on('error', (e) => {
       connectFailures.add(1);

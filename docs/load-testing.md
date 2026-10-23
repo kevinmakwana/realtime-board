@@ -31,17 +31,18 @@ Correctness limits are exactly zero, and any breach makes k6 exit non-zero:
 - `events_missing`: a `seq` between a socket's join and the newest one it saw never arrived
 - `events_duplicate`: the same `seq` delivered twice
 - `history_gaps`: after the run, each board's event log read back through the API is not gapless
-- `connect_failures`, and a check that events really did cross between instances
+- `connect_failures`: a socket that could not connect or join, or that was closed before the run's planned end; a command that never got its answer counts as `ops_failed`
+- a check that events really did cross between instances
 
-Latency limits are the two `*_P95_MS` values. The run also reports `ack_ms` (command sent to acknowledged) and `fanout_ms` (a card created on one socket until another socket receives it, split by whether it crossed instances).
+Latency limits are the two `*_P95_MS` values. The run also reports `ack_ms` (command sent to acknowledged) and `fanout_ms` (a card created on one socket until a socket on the board receives its event, the creator's own included; split by whether the receiver is on the creator's instance or the other one).
 
 The script's failure detection was checked with deliberately broken copies of it (mutation checks): they fail the run, so a green run is not just a script that cannot fail.
 
-CI runs a small version (10 users, 10 seconds, loose latency limits) on every pull request. That guards correctness and the script itself; it says nothing about performance, because shared CI runners are too noisy.
+CI runs a small version (10 users on one board, 10 seconds, loose latency limits) on every pull request. That guards correctness and the script itself; it says nothing about performance, because shared CI runners are too noisy.
 
 ## Reference numbers
 
-100 users on 10 boards, 60 s, 10 s ramp, 2 commands and 5 cursor packets per user per second, so about 200 commands/s offered and about 1,500 events/s delivered. Three runs on an otherwise idle Apple M1 laptop (8 cores) with Docker Desktop (8 CPUs, 8 GB), where k6, both Node instances, nginx, Postgres and Redis **all share the same machine**:
+100 users on 10 boards, 60 s, 10 s ramp, 2 commands and 5 cursor packets per user per second, so about 200 commands/s offered (each board event goes to every socket on its board, 10 here, so roughly 2,000 deliveries/s plus cursor packets). Three runs on an otherwise idle Apple M1 laptop (8 cores) with Docker Desktop (8 CPUs, 8 GB), where k6, both Node instances, nginx, Postgres and Redis **all share the same machine**:
 
 | Run | Commands acked | ack p95 | ack p99 | fan-out p95 (same / other instance) | Missing / duplicate / failed / history gaps |
 | --- | --- | --- | --- | --- | --- |
@@ -49,7 +50,7 @@ CI runs a small version (10 users, 10 seconds, loose latency limits) on every pu
 | 2 | 11,326 | 48 ms | 147 ms | 47 / 48 ms | 0 / 0 / 0 / 0 |
 | 3 | 11,337 | 21 ms | 90 ms | 22 / 24 ms | 0 / 0 / 0 / 0 |
 
-Roughly 27,000 to 31,000 events per run travelled between instances through Redis.
+In each run 27,000 to 31,000 `card.created` deliveries went to a socket on the other instance than the creator's (the `fanout_cross_instance` counter).
 
 How to read them:
 
