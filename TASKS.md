@@ -60,7 +60,6 @@
   - ARIA: column name is a real button (keyboard rename, no more `biome-ignore`), dialogs focus in, trap Tab and restore focus (`useDialogFocus`), shortcut help via `aria-describedby`; axe-core runs over the board, card dialog and share dialog (colour contrast is not covered: it needs a real browser)
   - Also fixed: Activity/Share buttons had white text on a white background, and the assignee checkboxes were stretched to full width
   - Verified: unit (moves, tile, column, modal, board, axe), e2e `keyboard.spec.ts` across two instances
-- [ ] **Offline command queue** - real queue and replay, if wanted after the copy fix
 - [x] ~~**CD, image publish, deploy guide**~~ (2026-10-24)
   - `publish` job in CI: after test, e2e, scale-profile and deploy-config pass on `main` or a `v*` tag, builds `server` and `web` for amd64 + arm64 and pushes them to GHCR (`latest`, `sha-*`, semver tags; pull requests never publish). `deploy/docker-compose.prod.yml` (secrets required, no dev sign-in, `TRUST_PROXY`) and `docs/deploy.md`; CI validates the compose file
   - Not done: an automatic deploy step, image signing; first publish may need the package made public by hand. Publishing itself can only be verified on the first run on `main`
@@ -74,10 +73,16 @@
 - [x] ~~**Load test**~~ (2026-10-24)
   - `loadtest/board.js` (k6, Socket.IO over WebSocket): zero-tolerance thresholds on lost/duplicate/refused events and log gaps, p95 limits on ack and cross-instance fan-out; CI runs a 10-user smoke; `docs/load-testing.md` has 3 reference runs (100 users, ~200 commands/s, p95 21 to 72 ms, laptop with everything on one machine). Added `PG_POOL_MAX` config on the way; `AUTH_RATE_LIMIT_PER_MIN` is passed through compose
   - Found: each Node instance saturates about one core at ~150 commands/s; Postgres is close behind; correctness held even saturated
-- [ ] **Consider websocket-only transport** - would remove the nginx sticky-session hashing, at the cost of no polling fallback
+- [x] **Phase 4 closed** (2026-10-24): all six chosen items shipped in four PRs (#18 tests, #19 keyboard/touch/ARIA, #20 paging/presence/retention, #21 CD + load test). The two items below were deliberately not taken; see Someday.
+- [x] ~~**Dependency advisory**~~ (2026-10-24): `npm audit` began failing on main (body-parser 2.3.0, GHSA-27r3-jxmh-p828); fixed by the lockfile bump to 2.4.0 (#22). All dependabot PRs merged after CI re-ran on the new pipeline (Node 26 and nginx 1.31 base images, tsup 9, checkout/setup-node/upload-artifact 7, @types/node 26)
 
 ## Waiting On
 
 ## Someday
+- [ ] **Offline command queue** - a real queue and replay; today a change made while disconnected is dropped with an honest message, not queued
+- [ ] **Websocket-only transport** - would remove the nginx sticky-session hashing, at the cost of no polling fallback
+- [ ] **Automatic deploy step** - CI publishes images to GHCR but nothing rolls them out; also image signing
+- [ ] **Load test beyond one laptop** - the reference numbers have the generator and the whole stack on one machine; repeat on separate hosts, and cover reconnect storms, instance restarts under load and very large boards
+- [ ] **Unloaded-comment `count`** is a hint (not reduced by live deletes) and a full re-snapshot forgets loaded older pages
 
 ## Done
