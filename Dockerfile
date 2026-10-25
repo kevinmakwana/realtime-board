@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:25-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
@@ -12,7 +12,7 @@ COPY apps apps
 RUN npm run build -w apps/server && npm run build -w apps/web
 
 # ---- API + Socket.IO instance ----
-FROM node:25-alpine AS server
+FROM node:26-alpine AS server
 WORKDIR /app
 ENV NODE_ENV=production
 # The server bundle inlines @board/shared, so only third-party runtime deps are installed.
