@@ -58,6 +58,39 @@ Keep these constraints and the rest is up to you:
 
 Push a tag: `git tag v1.0.0 && git push origin v1.0.0`. CI runs every job again on the tag and, if they pass, publishes `1.0.0` and `1.0` next to `sha-<commit>`. Pin `IMAGE_TAG=1.0.0` in `deploy/.env` to run exactly that release; rolling back is changing the tag and running `up -d` again (migrations only move forward, so check the release notes before rolling back across a migration).
 
+## Verifying the images
+
+Every published image is signed keyless with [cosign](https://docs.sigstore.dev/cosign/overview/) by the CI workflow itself (no key is stored anywhere), and carries an SBOM and build provenance attestation. To check that an image really came from this repository's CI before you run it:
+
+```bash
+cosign verify ghcr.io/kevinmakwana/realtime-board-server:1.0.0 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github.com/kevinmakwana/realtime-board/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$'
+docker buildx imagetools inspect ghcr.io/kevinmakwana/realtime-board-server:1.0.0 --format '{{ json .SBOM }}'
+```
+
+## Automatic deploy (optional)
+
+[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) can roll a new build out to one host over SSH after CI publishes it. It does nothing until you enable it:
+
+1. Put `deploy/docker-compose.prod.yml` and your `deploy/.env` on the host (a clone of this repository works), under a directory you name in the repository variable `DEPLOY_PATH`.
+2. Create a GitHub environment called `production` (add required reviewers there if you want a manual approval before each deploy) and add the secrets `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (a key allowed to run `docker compose` on the host) and `DEPLOY_KNOWN_HOSTS` (the output of `ssh-keyscan -t ed25519 <host>`; the host key is pinned, never accepted blindly).
+3. Set the repository variable `DEPLOY_ENABLED=true`, and optionally `DEPLOY_URL` (checked at `/ready` after the rollout).
+
+After a green CI run on `main` it deploys that commit's `sha-<commit>` tag. It first runs `cosign verify` and refuses an image that was not signed by this repository's CI workflow. To deploy a release or roll back, run the workflow by hand ("Run workflow") and give it a tag such as `1.0.0`.
+
+The rollout recreates the containers together, so expect a few seconds of reconnecting clients; they catch up on their own. The workflow has not been run against a real host; try it on a staging machine first.
+
+## WebSocket-only builds (optional)
+
+By default the browser starts with HTTP long-polling and upgrades to WebSocket, which is why nginx hashes sessions onto one instance. If every client path allows WebSockets you can build the web app without the polling fallback and drop that requirement:
+
+```bash
+docker build --target web --build-arg VITE_WS_ONLY=true -t my-board-web .
+```
+
+The published `web` image keeps the default. With a WebSocket-only build, `hash $arg_cid` in the nginx config becomes unnecessary (plain round-robin works), but it does no harm. Clients on networks that block WebSockets cannot connect to a WebSocket-only build at all.
+
 ## What is not covered
 
-There is no automatic deploy step: CI publishes images and stops. Running them is yours to wire (a webhook, Watchtower, your orchestrator's rollout). Image signing and an SBOM beyond buildx's default provenance are not set up.
+Zero-downtime rollouts (a rolling restart behind the load balancer) and multiple hosts: the compose file and the deploy workflow target a single machine.

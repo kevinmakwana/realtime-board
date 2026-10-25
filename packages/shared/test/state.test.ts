@@ -335,6 +335,27 @@ describe('comments changing while an older page is being fetched', () => {
     expect(s).toBe(resynced); // nothing added, and the button for the newer cursor is still there
   });
 
+  it('lowers the count when an unloaded comment is deleted live, if the event says which card it was on', () => {
+    const s = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: X, cardId: ids.card1 }));
+    expect(s.olderComments[ids.card1]).toMatchObject({ count: 1, cursor });
+    // An event for a loaded comment does not touch the count of unloaded ones.
+    const loaded = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: ids.card3, cardId: ids.card1 }));
+    expect(loaded.olderComments[ids.card1]).toMatchObject({ count: 2 });
+  });
+
+  it('leaves the count alone for a delete that does not name its card (older log entries)', () => {
+    const s = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: X }));
+    expect(s.olderComments[ids.card1]?.count).toBe(2);
+  });
+
+  it('does not take a comment off the count twice when its delete arrived before the stale page', () => {
+    const stalePage = [comment(X, ids.card1, { body: 'doomed' })];
+    const live = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: X, cardId: ids.card1 }));
+    // count was 2 (X and one more); X is gone, so one unloaded comment remains after this page.
+    const s = mergeOlderComments(live, ids.card1, stalePage, 'cur-2', cursor);
+    expect(s.olderComments[ids.card1]?.count).toBe(1);
+  });
+
   it('forgets what it remembered once the card has no older comments left', () => {
     const live = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: X }));
     expect(mergeOlderComments(live, ids.card1, [], null, cursor).olderComments).toEqual({});

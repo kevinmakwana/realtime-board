@@ -1,0 +1,99 @@
+name: Deploy
+
+# Rolls the images that CI just published out to one host over SSH. Inert until you turn it on:
+#   1. repository variable DEPLOY_ENABLED=true
+#   2. a GitHub environment named "production" (add required reviewers there if you want an approval step) with the
+#      secrets DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY (a private key allowed to run docker compose on the host) and
+#      DEPLOY_KNOWN_HOSTS (the output of `ssh-keyscan -t ed25519 <host>`, so the host key is pinned)
+#   3. variables DEPLOY_PATH (the directory on the host that holds deploy/docker-compose.prod.yml and deploy/.env)
+#      and optionally DEPLOY_URL (the public URL; checked at /ready afterwards)
+# See docs/deploy.md.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Image tag to deploy (for example 1.2.3 or sha-abc1234). Empty deploys the latest main build.
+        required: false
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: Deploy to production host
+    if: vars.DEPLOY_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    environment: production
+    env:
+      TAG_INPUT: ${{ inputs.tag }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+      IMAGE_PREFIX: ghcr.io/${{ github.repository }}
+    steps:
+      - name: Work out which image tag to deploy
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ -n "${TAG_INPUT:-}" ]; then tag="$TAG_INPUT"
+          elif [ -n "${RUN_SHA:-}" ]; then tag="sha-${RUN_SHA:0:7}"
+          else tag=latest; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Deploying $tag" >> "$GITHUB_STEP_SUMMARY"
+      - uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.4
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Refuse unsigned images (they must be signed by this repository's CI workflow)
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          repo="${IMAGE_PREFIX,,}"
+          for image in server web; do
+            cosign verify "${repo}-${image}:${TAG}" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$" \
+              > /dev/null
+          done
+      - name: Pull and restart on the host
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_HOST:?DEPLOY_HOST secret is not set}" "${DEPLOY_USER:?}" "${DEPLOY_SSH_KEY:?}" "${DEPLOY_KNOWN_HOSTS:?}" "${DEPLOY_PATH:?DEPLOY_PATH variable is not set}"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # The tag is validated here, so nothing but a plain tag reaches the remote shell.
+          [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad tag" >&2; exit 1; }
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cd '${DEPLOY_PATH}' && export IMAGE_TAG='${TAG}' && docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env pull && docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --wait --remove-orphans"
+      - name: Check the site answers
+        if: vars.DEPLOY_URL != ''
+        env:
+          DEPLOY_URL: ${{ vars.DEPLOY_URL }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 12); do
+            if curl -fsS "${DEPLOY_URL%/}/ready" | grep -q '"ok":true'; then echo ready; exit 0; fi
+            sleep 5
+          done
+          echo "the site did not become ready" >&2; exit 1

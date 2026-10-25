@@ -20,6 +20,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # CI tests on the Node version the image runs. Dependabot proposed an odd-numbered release (not LTS, already end
+      # of life), so Node majors are bumped by hand, together with setup-node and `engines`.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: docker-compose
     directory: /
     schedule:
