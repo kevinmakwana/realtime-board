@@ -240,7 +240,7 @@ export function BoardView({ client, vm, state, session }: Props) {
             ? `Live on ${vm.instance}`
             : vm.status === 'unauthorized'
               ? 'Signed out'
-              : 'Reconnecting…'}
+              : `Reconnecting…${vm.queued > 0 ? ` ${vm.queued} ${vm.queued === 1 ? 'change' : 'changes'} waiting` : ''}`}
         </span>
       </header>
 

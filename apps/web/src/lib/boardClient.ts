@@ -46,6 +46,8 @@ export interface BoardViewModel {
   selfSocketId: string | null;
   /** Your role on this board; null until the first join and after you are removed. */
   role: Role | null;
+  /** Changes made while disconnected that are waiting to be sent. */
+  queued: number;
 }
 
 export interface Notice {
@@ -53,11 +55,19 @@ export interface Notice {
   message: string;
 }
 
+/** A command made while disconnected: what to send later, and what it is about. */
+interface Queued {
+  send: () => Promise<Ack<Record<string, unknown>>>;
+  cardId?: string;
+}
+
 interface PendingEntry {
   id: number;
   op: PendingOp;
   /** Set once the server acked; the entry is dropped when the event log reaches this seq. */
   ackSeq?: number;
+  /** Set while the command waits for a connection; cleared the moment it is sent. */
+  queued?: Queued;
 }
 
 type Listener = () => void;
@@ -69,6 +79,8 @@ const CURSOR_IDLE_MS = 8000;
 /** How often a live client asks the server for anything it missed (plus up to HEAL_JITTER_MS so clients spread out). */
 const HEAL_INTERVAL_MS = 30_000;
 const HEAL_JITTER_MS = 5_000;
+/** How many changes may wait for a connection. Past this, further changes are refused rather than silently piling up. */
+const MAX_QUEUED = 100;
 
 /**
  * Client-side sync engine for one board, independent of React.
@@ -94,6 +106,10 @@ export class BoardClient {
   private queuedCursor: { x: number; y: number } | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | undefined;
   private healTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Card versions that queued changes are based on: what we knew when going offline, then what our own sends produced. */
+  private queueBase = new Map<string, number>();
+  private flushing = false;
+  private unloadGuard = false;
 
   private listeners = new Set<Listener>();
   private noticeListeners = new Set<(n: Notice) => void>();
@@ -105,6 +121,7 @@ export class BoardClient {
     cursors: [],
     selfSocketId: null,
     role: null,
+    queued: 0,
   };
   private cursors = new Map<string, RemoteCursor>();
 
@@ -136,6 +153,7 @@ export class BoardClient {
       if (p.role === null) {
         this.pending = [];
         this.chains.clear();
+        this.queueBase.clear();
         this.update({ status: 'removed', role: null });
         return;
       }
@@ -173,9 +191,22 @@ export class BoardClient {
         : null,
       cursors: [...this.cursors.values()],
       selfSocketId: this.socket.id ?? null,
+      queued: this.pending.reduce((n, p) => n + (p.queued ? 1 : 0), 0),
     };
+    this.guardUnload(this.model.queued > 0);
     for (const fn of this.listeners) fn();
   }
+
+  /** While changes exist only in this tab, closing it would lose them: ask the browser to confirm. */
+  private guardUnload(on: boolean): void {
+    if (on === this.unloadGuard || typeof window === 'undefined') return;
+    this.unloadGuard = on;
+    if (on) window.addEventListener('beforeunload', this.confirmUnload);
+    else window.removeEventListener('beforeunload', this.confirmUnload);
+  }
+  private confirmUnload = (e: BeforeUnloadEvent): void => {
+    e.preventDefault();
+  };
 
   /** Adds a page of a card's older comments that was fetched over REST (see `mergeOlderComments`). */
   addOlderComments(cardId: string, page: Comment[], nextCursor: string | null, requestCursor: string): void {
@@ -190,6 +221,7 @@ export class BoardClient {
     clearInterval(this.pruneTimer);
     clearTimeout(this.healTimer);
     if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    this.guardUnload(false);
     if (this.joined) this.socket.emit('board:leave', { boardId: this.boardId });
     this.socket.off();
     this.socket.disconnect();
@@ -219,8 +251,11 @@ export class BoardClient {
     }
     if (!ack.ok) {
       // A board we cannot join is one we were removed from (or that never existed): say so, do not retry.
-      if (ack.code === 'NOT_FOUND') this.update({ status: 'removed', role: null });
-      else {
+      if (ack.code === 'NOT_FOUND') {
+        this.pending = [];
+        this.queueBase.clear();
+        this.update({ status: 'removed', role: null });
+      } else {
         this.notice('error', ack.message);
         if (quiet) this.scheduleHeal();
       }
@@ -238,6 +273,7 @@ export class BoardClient {
     if (!quiet) this.cursors.clear();
     this.update({ status: 'live', instance: ack.instance, presence: ack.presence, role: ack.role });
     this.scheduleHeal();
+    void this.flushQueue();
   }
 
   /**
@@ -278,8 +314,9 @@ export class BoardClient {
   private onDisconnect(): void {
     this.joined = false;
     clearTimeout(this.healTimer);
-    // In-flight commands have an unknown outcome; drop the optimistic layer and let catch-up show the truth.
-    this.pending = [];
+    // In-flight commands have an unknown outcome; drop their optimistic layer and let catch-up show the truth.
+    // Changes still waiting to be sent were never tried, so they stay.
+    this.pending = this.pending.filter((p) => p.queued);
     this.chains.clear();
     this.update({ status: 'reconnecting' });
   }
@@ -304,6 +341,9 @@ export class BoardClient {
    * Optimistically apply `op`, then send. Commands that touch the same entity are chained so each one
    * is based on the version the previous one produced (otherwise a user editing then moving a card
    * quickly would conflict with themselves).
+   *
+   * While disconnected the command is queued instead: it shows at once, and is sent in order when the
+   * connection is back (see `flushQueue`). The queue lives in this tab only.
    */
   private submit(
     op: PendingOp,
@@ -311,7 +351,7 @@ export class BoardClient {
     send: () => Promise<Ack<Record<string, unknown>>>,
     cardId?: string,
   ): boolean {
-    if (!this.joined || !this.auth) {
+    if (!this.auth || this.model.status === 'removed' || this.model.status === 'unauthorized') {
       this.notice('error', 'You are offline, so that change was not saved. Try again once you are reconnected.');
       return false;
     }
@@ -320,36 +360,105 @@ export class BoardClient {
       return false;
     }
     const entry: PendingEntry = { id: this.nextId++, op };
+    if (!this.joined || this.flushing) {
+      const waiting = this.pending.filter((p) => p.queued).length;
+      if (waiting >= MAX_QUEUED) {
+        this.notice('error', 'Too many changes are waiting for a connection, so that one was not saved.');
+        return false;
+      }
+      if (cardId && !this.queueBase.has(cardId)) this.queueBase.set(cardId, this.rawBaseVersion(cardId));
+      entry.queued = { send, cardId };
+      this.pending.push(entry);
+      this.update({});
+      if (waiting === 0 && !this.flushing) {
+        this.notice('info', 'You are offline. Your changes are kept here and will be sent when you reconnect.');
+      }
+      return true;
+    }
     this.pending.push(entry);
     this.update({});
-    const run = async () => {
-      try {
-        this.settle(entry, await send(), cardId);
-      } catch {
-        this.drop(entry);
-        this.notice('error', 'The server did not respond. Your change was undone.');
-      }
-    };
-    this.chains.set(chainKey, (this.chains.get(chainKey) ?? Promise.resolve()).then(run));
+    this.chains.set(
+      chainKey,
+      (this.chains.get(chainKey) ?? Promise.resolve()).then(async () => {
+        await this.execute(entry, send, cardId, false);
+      }),
+    );
     return true;
   }
 
-  private settle(entry: PendingEntry, ack: Ack<Record<string, unknown>>, cardId?: string): void {
+  /** Send one command and settle its optimistic entry. Returns true if the server accepted it. */
+  private async execute(
+    entry: PendingEntry,
+    send: () => Promise<Ack<Record<string, unknown>>>,
+    cardId: string | undefined,
+    batch: boolean,
+  ): Promise<boolean> {
+    try {
+      return this.settle(entry, await send(), cardId, batch);
+    } catch {
+      this.drop(entry);
+      if (!batch) this.notice('error', 'The server did not respond. Your change was undone.');
+      return false;
+    }
+  }
+
+  /**
+   * Send what was queued while disconnected, one command at a time and in the order it was made (a comment on a
+   * card made offline must not overtake the card). Each command carries the card version it was made against, so
+   * if someone else changed that card meanwhile the server refuses it and it is reported, never applied over theirs.
+   */
+  private async flushQueue(): Promise<void> {
+    if (this.flushing) return;
+    this.flushing = true;
+    let sent = 0;
+    let failed = 0;
+    try {
+      while (this.joined) {
+        const entry = this.pending.find((p) => p.queued);
+        const queued = entry?.queued;
+        if (!entry || !queued) break;
+        entry.queued = undefined;
+        this.update({});
+        sent++;
+        if (!(await this.execute(entry, queued.send, queued.cardId, true))) failed++;
+      }
+    } finally {
+      this.flushing = false;
+    }
+    if (sent === 0) return;
+    if (!this.pending.some((p) => p.queued)) this.queueBase.clear();
+    if (failed === 0) {
+      this.notice('info', sent === 1 ? '1 offline change was saved.' : `${sent} offline changes were saved.`);
+    } else {
+      this.notice(
+        'error',
+        `${failed} of ${sent} offline ${sent === 1 ? 'change was' : 'changes were'} not applied because the board changed meanwhile (or you can no longer edit it). Showing the current board.`,
+      );
+      void this.join();
+    }
+  }
+
+  private settle(entry: PendingEntry, ack: Ack<Record<string, unknown>>, cardId?: string, batch = false): boolean {
     if (ack.ok) {
       entry.ackSeq = ack.seq ?? 0;
       const version = ack.version;
-      if (cardId && typeof version === 'number') this.known.set(cardId, version);
+      if (cardId && typeof version === 'number') {
+        this.known.set(cardId, version);
+        if (this.queueBase.has(cardId)) this.queueBase.set(cardId, version);
+      }
       this.prune();
       this.update({});
-      return;
+      return true;
     }
     // Rejected: rolling back is just removing the optimistic op.
     this.drop(entry);
+    if (batch) return false; // the flush reports all refusals at once, and resyncs once
     this.notice(
       'error',
       ack.code === 'VERSION_CONFLICT' ? 'Someone else changed that card first. Showing their version.' : ack.message,
     );
     if (ack.code === 'VERSION_CONFLICT' || ack.code === 'NOT_FOUND') void this.join();
+    return false;
   }
 
   private drop(entry: PendingEntry): void {
@@ -364,8 +473,13 @@ export class BoardClient {
     this.pending = this.pending.filter((p) => p.ackSeq === undefined || p.ackSeq > seq);
   }
 
-  private baseVersion(cardId: string): number {
+  /** The newest card version we know of. A change made offline uses the version it was made against instead. */
+  private rawBaseVersion(cardId: string): number {
     return Math.max(this.known.get(cardId) ?? 0, this.auth?.cards[cardId]?.version ?? 0);
+  }
+
+  private baseVersion(cardId: string): number {
+    return this.queueBase.get(cardId) ?? this.rawBaseVersion(cardId);
   }
 
   createCard(columnId: string, title: string): void {
