@@ -348,6 +348,16 @@ describe('comments changing while an older page is being fetched', () => {
     expect(s.olderComments[ids.card1]?.count).toBe(2);
   });
 
+  it('still takes a comment off the count when an older delete (no card named) arrived before the stale page', () => {
+    const stalePage = [comment(X, ids.card1, { body: 'doomed' })];
+    const live = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: X }));
+    // Nothing lowered the count (count 2: X and one more), so the page's X must not be treated as already counted:
+    // it is shown as deleted (not added), and the one unloaded comment that really remains is what is left.
+    const s = mergeOlderComments(live, ids.card1, stalePage, 'cur-2', cursor);
+    expect(s.comments[X]).toBeUndefined();
+    expect(s.olderComments[ids.card1]?.count).toBe(1);
+  });
+
   it('does not take a comment off the count twice when its delete arrived before the stale page', () => {
     const stalePage = [comment(X, ids.card1, { body: 'doomed' })];
     const live = applyEvent(partial(), ev(11, 'comment.deleted', { commentId: X, cardId: ids.card1 }));

@@ -31,7 +31,16 @@ permissions:
 jobs:
   deploy:
     name: Deploy to production host
-    if: vars.DEPLOY_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    # Only a push to this repository's main (a fork's pull request can have a branch called "main" too), or a manual
+    # run from main (a run from another branch could change this file and read the secrets).
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' && (
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_repository.full_name == github.repository)
+      )
     runs-on: ubuntu-24.04
     environment: production
     env:
@@ -56,17 +65,25 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Refuse unsigned images (they must be signed by this repository's CI workflow)
+      - name: Resolve the images to digests and refuse unsigned ones
+        id: images
         env:
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
+          [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad tag" >&2; exit 1; }
           repo="${IMAGE_PREFIX,,}"
+          echo "prefix=$repo" >> "$GITHUB_OUTPUT"
           for image in server web; do
-            cosign verify "${repo}-${image}:${TAG}" \
+            digest=$(docker buildx imagetools inspect "${repo}-${image}:${TAG}" --format '{{.Manifest.Digest}}')
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no digest for ${image}" >&2; exit 1; }
+            # The signature must come from this repository's CI workflow on main or a release tag.
+            cosign verify "${repo}-${image}@${digest}" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-              --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$" \
+              --certificate-identity-regexp "^https://github\.com/${GITHUB_REPOSITORY//./\\.}/\.github/workflows/ci\.yml@refs/(heads/main|tags/v.+)$" \
               > /dev/null
+            echo "${image}=@${digest}" >> "$GITHUB_OUTPUT"
+            echo "${image}: ${digest}" >> "$GITHUB_STEP_SUMMARY"
           done
       - name: Pull and restart on the host
         env:
@@ -76,16 +93,19 @@ jobs:
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           TAG: ${{ steps.tag.outputs.tag }}
+          PREFIX: ${{ steps.images.outputs.prefix }}
+          SERVER_PIN: ${{ steps.images.outputs.server }}
+          WEB_PIN: ${{ steps.images.outputs.web }}
         run: |
           set -euo pipefail
           : "${DEPLOY_HOST:?DEPLOY_HOST secret is not set}" "${DEPLOY_USER:?}" "${DEPLOY_SSH_KEY:?}" "${DEPLOY_KNOWN_HOSTS:?}" "${DEPLOY_PATH:?DEPLOY_PATH variable is not set}"
+          [[ "$DEPLOY_PATH" =~ ^[A-Za-z0-9._/~-]+$ ]] || { echo "DEPLOY_PATH may only contain letters, digits and . _ / ~ -" >&2; exit 1; }
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key && chmod 600 ~/.ssh/deploy_key
           printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          # The tag is validated here, so nothing but a plain tag reaches the remote shell.
-          [[ "$TAG" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "bad tag" >&2; exit 1; }
+          # The host runs exactly the digests that were just verified, under the same image names, whatever its .env says.
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "cd '${DEPLOY_PATH}' && export IMAGE_TAG='${TAG}' && docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env pull && docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --wait --remove-orphans"
+            "cd '${DEPLOY_PATH}' && export IMAGE_PREFIX='${PREFIX}' IMAGE_TAG='${TAG}' SERVER_IMAGE_PIN='${SERVER_PIN}' WEB_IMAGE_PIN='${WEB_PIN}' && docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env pull && docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env up -d --wait --remove-orphans"
       - name: Check the site answers
         if: vars.DEPLOY_URL != ''
         env:

@@ -202,5 +202,5 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' "$TAGS" | sed 's/:.*//' | sort -u | while read -r name; do
-            cosign sign --yes "${name}@${DIGEST}"
+            cosign sign --yes --recursive "${name}@${DIGEST}"
           done

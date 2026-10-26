@@ -74,10 +74,10 @@ docker buildx imagetools inspect ghcr.io/kevinmakwana/realtime-board-server:1.0.
 [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) can roll a new build out to one host over SSH after CI publishes it. It does nothing until you enable it:
 
 1. Put `deploy/docker-compose.prod.yml` and your `deploy/.env` on the host (a clone of this repository works), under a directory you name in the repository variable `DEPLOY_PATH`.
-2. Create a GitHub environment called `production` (add required reviewers there if you want a manual approval before each deploy) and add the secrets `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (a key allowed to run `docker compose` on the host) and `DEPLOY_KNOWN_HOSTS` (the output of `ssh-keyscan -t ed25519 <host>`; the host key is pinned, never accepted blindly).
+2. Create a GitHub environment called `production`, restrict its deployment branches to `main`, and add required reviewers there if you want a manual approval before each deploy and add the secrets `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY` (a key allowed to run `docker compose` on the host) and `DEPLOY_KNOWN_HOSTS` (the output of `ssh-keyscan -t ed25519 <host>`; the host key is pinned, never accepted blindly).
 3. Set the repository variable `DEPLOY_ENABLED=true`, and optionally `DEPLOY_URL` (checked at `/ready` after the rollout).
 
-After a green CI run on `main` it deploys that commit's `sha-<commit>` tag. It first runs `cosign verify` and refuses an image that was not signed by this repository's CI workflow. To deploy a release or roll back, run the workflow by hand ("Run workflow") and give it a tag such as `1.0.0`.
+After a green CI **push** run on `main` (pull requests, including from forks, never deploy) it deploys that commit's `sha-<commit>` image. It resolves the tag to a digest, runs `cosign verify` on that digest and refuses an image that was not signed by this repository's CI workflow, then tells the host to run exactly those digests under those image names (whatever `IMAGE_PREFIX` says in the host's `.env`). To deploy a release or roll back, run the workflow by hand ("Run workflow") and give it a tag such as `1.0.0`.
 
 The rollout recreates the containers together, so expect a few seconds of reconnecting clients; they catch up on their own. The workflow has not been run against a real host; try it on a staging machine first.
 
