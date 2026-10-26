@@ -25,7 +25,7 @@ EXPOSE 3001
 CMD ["node", "dist/index.js"]
 
 # ---- nginx: static web app + sticky load balancer for the API instances ----
-FROM nginx:1.29-alpine AS web
+FROM nginx:1.31-alpine AS web
 COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
 EXPOSE 80
