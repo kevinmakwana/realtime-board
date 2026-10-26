@@ -116,6 +116,8 @@ jobs:
           k6-version: 2.3.0 # the script uses k6/ws; bump on purpose
       - name: Load test smoke (10 users for 10 s; fails on any lost, repeated or refused event)
         run: VUS=10 BOARDS=1 DURATION=10 RAMP=2 ACK_P95_MS=3000 FANOUT_P95_MS=3000 k6 run loadtest/board.js
+      - name: Reconnect storm smoke (everyone hangs up at once and must catch up with nothing lost)
+        run: VUS=10 BOARDS=1 DURATION=14 RAMP=2 STORM_AT=6 STORM_SPREAD=2 ACK_P95_MS=5000 FANOUT_P95_MS=5000 RESYNC_P95_MS=10000 k6 run loadtest/board.js
       - name: Logs on failure
         if: failure()
         run: docker compose --profile scale logs --no-color

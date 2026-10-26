@@ -20,6 +20,10 @@ BASE_URL=https://board.example.com k6 run loadtest/board.js
 | `DURATION`, `RAMP` | 60, 10 | seconds each user stays; users join spread over `RAMP` seconds |
 | `OPS_PER_SEC`, `CURSORS_PER_SEC` | 2, 5 | commands per user (the server allows 20/s per socket) and cursor packets per user |
 | `ACK_P95_MS`, `FANOUT_P95_MS` | 500, 1000 | latency limits that fail the run |
+| `STORM_AT`, `STORM_SPREAD` | 0 (off), 2 | reconnect storm: at `STORM_AT` seconds every user hangs up and returns within `STORM_SPREAD` seconds |
+| `RECONNECT` | off | an unplanned disconnect is an outage to recover from, not a failure (use with a restart, below) |
+| `SEED_CARDS` | 0 | cards each user creates first; `BOARDS=1 VUS=100 SEED_CARDS=30` is one board of about 3,000 cards |
+| `RESYNC_P95_MS` | 5000 | limit on how long a returning user waits for its join to be answered |
 
 Do not aim it at a deployment you care about: it creates users, boards and cards.
 
