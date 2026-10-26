@@ -136,7 +136,7 @@ test('changes made while offline are kept, shown at once, and sent when the conn
 
   await grace.evaluate(() => {
     const s = (window as any).__boardSocket;
-    s.io.reconnectionDelay(3000).randomizationFactor(0);
+    s.io.reconnectionDelay(8000).randomizationFactor(0);
     s.io.engine.close();
   });
   await expect(grace.getByTestId('connection')).toContainText('Reconnecting');
@@ -148,7 +148,7 @@ test('changes made while offline are kept, shown at once, and sent when the conn
   await expect(cardsIn(ada, 'To do')).toHaveCount(1); // Ada cannot see it yet
 
   // The connection comes back: it is sent, and Ada receives it.
-  await expect(grace.getByTestId('connection')).toContainText('Live on', { timeout: 15_000 });
+  await expect(grace.getByTestId('connection')).toContainText('Live on', { timeout: 30_000 });
   await expect(cardsIn(ada, 'To do')).toHaveText([/Existing/, /Written offline/]);
   await expect(grace.getByTestId('connection')).not.toContainText('waiting');
 

@@ -86,7 +86,12 @@ describe('BoardView', () => {
 
   it('says how many changes are waiting while offline', () => {
     setup({ status: 'reconnecting', queued: 2 });
-    expect(screen.getByTestId('connection')).toHaveTextContent('Reconnecting… 2 changes waiting');
+    expect(screen.getByTestId('connection')).toHaveTextContent('Reconnecting… · 2 changes waiting');
+  });
+
+  it('also says so while live, when changes are still being sent', () => {
+    setup({ status: 'live', queued: 1 });
+    expect(screen.getByTestId('connection')).toHaveTextContent('Live on a · 1 change waiting');
   });
 
   it('does not mention waiting changes when there are none', () => {

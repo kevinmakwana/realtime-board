@@ -71,15 +71,35 @@ class FakeSocket {
     return this;
   }
   fire(ev: string, ...args: any[]) {
+    if (ev === 'disconnect') this.connected = false;
+    if (ev === 'connect') this.connected = true;
     for (const fn of this.handlers.get(ev) ?? []) fn(...args);
   }
   emit(event: string, payload: any) {
     this.sent.push({ event, payload });
   }
-  timeout() {
+  /** Like socket.io: if no answer comes within `ms`, the callback gets an Error instead. */
+  timeout(ms = 8000) {
     return {
-      emit: (event: string, payload: any, ack: (err: Error | null, a: any) => void) =>
-        this.sent.push({ event, payload, ack }),
+      emit: (event: string, payload: any, ack: (err: Error | null, a: any) => void) => {
+        let done = false;
+        const timer = setTimeout(() => {
+          if (!done) {
+            done = true;
+            ack(new Error('operation has timed out'), undefined);
+          }
+        }, ms);
+        this.sent.push({
+          event,
+          payload,
+          ack: (err, a) => {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            ack(err, a);
+          },
+        });
+      },
     };
   }
   disconnect() {
@@ -383,19 +403,98 @@ describe('offline command queue', () => {
     expect(socket.last('card:update').payload).toMatchObject({ baseVersion: 2, description: 'Two' });
   });
 
-  it('keeps what it has not sent yet if the connection drops again during the replay', async () => {
-    const { socket, client } = await offline();
+  it('puts a command that was in flight when the connection dropped again back in the queue, and sends it at once on the next join', async () => {
+    const { socket, client, notices } = await offline();
     client.createCard(COL_A, 'A');
     client.createCard(COL_A, 'B');
     await rejoin(socket);
     expect(socket.count('card:create')).toBe(1);
-    socket.fire('disconnect'); // the first one is now in doubt; the second was never sent
-    expect(client.getSnapshot().queued).toBe(1);
-    socket.last('card:create').ack!(new Error('timeout'), undefined); // the first command's ack never came
+    socket.fire('disconnect'); // A's answer never comes
+    expect(client.getSnapshot().queued).toBe(2); // A is waiting again, B was never sent
+    await rejoin(socket); // reconnects long before A's 8 s timeout
+    expect(socket.count('card:create')).toBe(2); // A again, without waiting for the timeout (creates are safe to repeat)
+    expect(socket.last('card:create').payload).toMatchObject({ title: 'A' });
+    socket.last('card:create').ack!(null, ok({ version: 1 }));
     await vi.advanceTimersByTimeAsync(0);
-    await rejoin(socket);
-    expect(socket.count('card:create')).toBe(2);
     expect(socket.last('card:create').payload).toMatchObject({ title: 'B' });
+    socket.last('card:create').ack!(null, ok({ version: 1 }));
+    await vi.advanceTimersByTimeAsync(9000); // the first, abandoned send times out meanwhile: nothing to report
+    expect(client.getSnapshot().queued).toBe(0);
+    expect(notices.filter((n) => n.kind === 'error')).toEqual([]);
+    expect(notices.at(-1)?.message).toMatch(/2 offline changes were saved/i); // one summary for the whole outage
+  });
+
+  it('queues changes made during the replay behind the ones already waiting', async () => {
+    const { socket, client } = await offline();
+    client.createCard(COL_A, 'First');
+    await rejoin(socket);
+    client.createCard(COL_A, 'Second'); // made while the first is still being sent
+    expect(socket.count('card:create')).toBe(1);
+    socket.last('card:create').ack!(null, ok({ version: 1 }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.count('card:create')).toBe(2);
+    expect(socket.last('card:create').payload).toMatchObject({ title: 'Second' });
+  });
+
+  it('does not call a re-sync while still connected "offline", and sends the version it finds afterwards', async () => {
+    const { socket, client } = await setup();
+    const notices: { kind: string; message: string }[] = [];
+    client.onNotice((n) => notices.push(n));
+    client.updateCard(CARD, { title: 'first try' });
+    await vi.advanceTimersByTimeAsync(0);
+    socket.last('card:update').ack!(null, { ok: false, code: 'VERSION_CONFLICT', message: 'stale' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.count('board:join')).toBe(2); // resyncing; the socket itself is fine
+    client.updateCard(CARD, { title: 'second try' });
+    expect(notices.filter((n) => /offline/i.test(n.message))).toEqual([]);
+    expect(socket.count('card:update')).toBe(1); // waits for the resync
+    socket.last('board:join').ack!(null, {
+      ok: true,
+      mode: 'snapshot',
+      snapshot: { ...snapshot(9), cards: [card(1, COL_A, 'a0', 5), card(2, COL_A, 'a1')] },
+      instance: 'server-1',
+      presence: [],
+      role: 'editor',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.count('card:update')).toBe(2);
+    expect(socket.last('card:update').payload).toMatchObject({ baseVersion: 5, title: 'second try' });
+  });
+
+  it('will not queue deleting a column, which would delete cards others added meanwhile', async () => {
+    const { client, notices } = await offline();
+    client.deleteColumn(COL_B);
+    expect(client.getSnapshot().queued).toBe(0);
+    expect(client.getSnapshot().state!.columns[COL_B]).toBeDefined();
+    expect(notices.at(-1)).toEqual({ kind: 'error', message: expect.stringMatching(/delet.*column.*connect/i) });
+  });
+
+  it('sends nothing, and says why, when the board turned read-only while offline', async () => {
+    const { socket, client, notices } = await offline();
+    client.createCard(COL_A, 'x');
+    socket.fire('connect');
+    socket.last('board:join').ack!(null, {
+      ok: true,
+      mode: 'replay',
+      events: [],
+      seq: 3,
+      instance: 'server-1',
+      presence: [],
+      role: 'viewer',
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.count('card:create')).toBe(0);
+    expect(client.getSnapshot().queued).toBe(0);
+    expect(notices.at(-1)).toEqual({ kind: 'error', message: expect.stringMatching(/view-only.*1 offline change/i) });
+  });
+
+  it('tells the user their waiting changes were discarded when access is removed', async () => {
+    const { socket, client, notices } = await offline();
+    client.createCard(COL_A, 'x');
+    client.createCard(COL_A, 'y');
+    socket.fire('board:access', { boardId: BOARD, role: null });
+    expect(client.getSnapshot().queued).toBe(0);
+    expect(notices.at(-1)).toEqual({ kind: 'error', message: expect.stringMatching(/2 offline changes.*discarded/i) });
   });
 
   it('refuses when read-only, and past the limit', async () => {
@@ -530,7 +629,7 @@ describe('healing lost broadcasts', () => {
 
   it('applies an event the broadcast lost, without ever looking offline', async () => {
     const { socket, client } = await setup(3);
-    await vi.advanceTimersByTimeAsync(40_000);
+    await vi.advanceTimersByTimeAsync(35_500); // the check goes out between 30 s and 35 s; it times out 8 s later
     // While the check is in flight the board still accepts edits.
     client.createCard(COL_A, 'During the check');
     await vi.advanceTimersByTimeAsync(0);
@@ -574,7 +673,7 @@ describe('healing lost broadcasts', () => {
 
   it('shows "removed" if a check finds the board is no longer accessible', async () => {
     const { socket, client } = await setup(3);
-    await vi.advanceTimersByTimeAsync(40_000);
+    await vi.advanceTimersByTimeAsync(35_500);
     socket.last('board:join').ack!(null, { ok: false, code: 'NOT_FOUND', message: 'Board not found' });
     await vi.advanceTimersByTimeAsync(0);
     expect(client.getSnapshot().status).toBe('removed');

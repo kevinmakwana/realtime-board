@@ -58,6 +58,7 @@ export interface Notice {
 /** A command made while disconnected: what to send later, and what it is about. */
 interface Queued {
   send: () => Promise<Ack<Record<string, unknown>>>;
+  chainKey: string;
   cardId?: string;
 }
 
@@ -68,7 +69,12 @@ interface PendingEntry {
   ackSeq?: number;
   /** Set while the command waits for a connection; cleared the moment it is sent. */
   queued?: Queued;
+  /** What a replay is sending right now. If the connection breaks before the answer, it goes back to `queued`. */
+  origin?: Queued;
 }
+
+/** Changes that exist only in this tab so far: waiting to be sent, or sent by a replay and not yet answered. */
+const isWaiting = (p: PendingEntry): boolean => !!p.queued || (!!p.origin && p.ackSeq === undefined);
 
 type Listener = () => void;
 
@@ -109,6 +115,11 @@ export class BoardClient {
   /** Card versions that queued changes are based on: what we knew when going offline, then what our own sends produced. */
   private queueBase = new Map<string, number>();
   private flushing = false;
+  /** Bumped on every disconnect, so a replay that was waiting on the old connection knows it is no longer in charge. */
+  private flushGen = 0;
+  /** True from a disconnect until the changes made meanwhile have been sent: the view may be older than the server. */
+  private outage = false;
+  private flushed = { sent: 0, failed: 0 };
   private unloadGuard = false;
 
   private listeners = new Set<Listener>();
@@ -151,9 +162,7 @@ export class BoardClient {
     socket.on('board:access', (p) => {
       if (p.boardId !== this.boardId) return;
       if (p.role === null) {
-        this.pending = [];
-        this.chains.clear();
-        this.queueBase.clear();
+        this.discardQueue('because you no longer have access to this board');
         this.update({ status: 'removed', role: null });
         return;
       }
@@ -191,9 +200,9 @@ export class BoardClient {
         : null,
       cursors: [...this.cursors.values()],
       selfSocketId: this.socket.id ?? null,
-      queued: this.pending.reduce((n, p) => n + (p.queued ? 1 : 0), 0),
+      queued: this.pending.reduce((n, p) => n + (isWaiting(p) ? 1 : 0), 0),
     };
-    this.guardUnload(this.model.queued > 0);
+    this.guardUnload(this.model.queued > 0 && this.model.status !== 'unauthorized');
     for (const fn of this.listeners) fn();
   }
 
@@ -206,7 +215,19 @@ export class BoardClient {
   }
   private confirmUnload = (e: BeforeUnloadEvent): void => {
     e.preventDefault();
+    e.returnValue = ''; // older browsers only show their prompt for this
   };
+
+  /** Throw away everything that only exists in this tab, and say so. */
+  private discardQueue(why: string): void {
+    const n = this.pending.filter(isWaiting).length;
+    this.pending = [];
+    this.chains.clear();
+    this.queueBase.clear();
+    this.outage = false;
+    this.flushed = { sent: 0, failed: 0 };
+    if (n > 0) this.notice('error', `${n} offline ${n === 1 ? 'change was' : 'changes were'} discarded ${why}.`);
+  }
 
   /** Adds a page of a card's older comments that was fetched over REST (see `mergeOlderComments`). */
   addOlderComments(cardId: string, page: Comment[], nextCursor: string | null, requestCursor: string): void {
@@ -252,8 +273,7 @@ export class BoardClient {
     if (!ack.ok) {
       // A board we cannot join is one we were removed from (or that never existed): say so, do not retry.
       if (ack.code === 'NOT_FOUND') {
-        this.pending = [];
-        this.queueBase.clear();
+        this.discardQueue('because you no longer have access to this board');
         this.update({ status: 'removed', role: null });
       } else {
         this.notice('error', ack.message);
@@ -313,10 +333,18 @@ export class BoardClient {
 
   private onDisconnect(): void {
     this.joined = false;
+    this.outage = true;
+    this.flushGen++; // a replay waiting on the old connection must hand over to the next one
+    this.flushing = false;
     clearTimeout(this.healTimer);
     // In-flight commands have an unknown outcome; drop their optimistic layer and let catch-up show the truth.
-    // Changes still waiting to be sent were never tried, so they stay.
-    this.pending = this.pending.filter((p) => p.queued);
+    // Changes still waiting to be sent were never tried, so they stay, and so do the ones a replay had sent
+    // without an answer yet: they go back in the queue (creates are safe to repeat, and a versioned change that
+    // did land conflicts on resend and is then reported, with the board resynced to show it).
+    this.pending = this.pending.filter((p) => {
+      if (!p.queued && p.origin && p.ackSeq === undefined) p.queued = p.origin;
+      return !!p.queued;
+    });
     this.chains.clear();
     this.update({ status: 'reconnecting' });
   }
@@ -342,8 +370,8 @@ export class BoardClient {
    * is based on the version the previous one produced (otherwise a user editing then moving a card
    * quickly would conflict with themselves).
    *
-   * While disconnected the command is queued instead: it shows at once, and is sent in order when the
-   * connection is back (see `flushQueue`). The queue lives in this tab only.
+   * While the connection is down, or being re-established, the command is queued instead: it shows at once, and
+   * is sent in order when the connection is back (see `flushQueue`). The queue lives in this tab only.
    */
   private submit(
     op: PendingOp,
@@ -351,8 +379,16 @@ export class BoardClient {
     send: () => Promise<Ack<Record<string, unknown>>>,
     cardId?: string,
   ): boolean {
-    if (!this.auth || this.model.status === 'removed' || this.model.status === 'unauthorized') {
+    if (!this.auth) {
       this.notice('error', 'You are offline, so that change was not saved. Try again once you are reconnected.');
+      return false;
+    }
+    if (this.model.status === 'removed') {
+      this.notice('error', 'You no longer have access to this board, so that change was not saved.');
+      return false;
+    }
+    if (this.model.status === 'unauthorized') {
+      this.notice('error', 'You are signed out, so that change was not saved.');
       return false;
     }
     if (this.model.role === 'viewer') {
@@ -361,41 +397,61 @@ export class BoardClient {
     }
     const entry: PendingEntry = { id: this.nextId++, op };
     if (!this.joined || this.flushing) {
+      // Deleting a column deletes its cards, including ones others add while this change waits: needs a live connection.
+      if (op.kind === 'column.delete') {
+        this.notice('error', 'Deleting a column needs a connection. Try again once you are reconnected.');
+        return false;
+      }
       const waiting = this.pending.filter((p) => p.queued).length;
       if (waiting >= MAX_QUEUED) {
         this.notice('error', 'Too many changes are waiting for a connection, so that one was not saved.');
         return false;
       }
-      if (cardId && !this.queueBase.has(cardId)) this.queueBase.set(cardId, this.rawBaseVersion(cardId));
-      entry.queued = { send, cardId };
+      // After a disconnect the view is older than the server, so a card change is based on the version the user
+      // saw. During a quick re-sync on a live connection, the version is read when the change is sent instead.
+      if (this.outage && cardId && !this.queueBase.has(cardId)) this.queueBase.set(cardId, this.rawBaseVersion(cardId));
+      entry.queued = { send, chainKey, cardId };
       this.pending.push(entry);
       this.update({});
-      if (waiting === 0 && !this.flushing) {
+      if (this.outage && waiting === 0 && !this.flushing) {
         this.notice('info', 'You are offline. Your changes are kept here and will be sent when you reconnect.');
       }
       return true;
     }
     this.pending.push(entry);
     this.update({});
-    this.chains.set(
-      chainKey,
-      (this.chains.get(chainKey) ?? Promise.resolve()).then(async () => {
-        await this.execute(entry, send, cardId, false);
-      }),
-    );
+    void this.chained(entry, { send, chainKey, cardId }, false);
     return true;
   }
 
-  /** Send one command and settle its optimistic entry. Returns true if the server accepted it. */
+  /** Run a command after the previous one on the same entity has finished. */
+  private chained(entry: PendingEntry, q: Queued, batch: boolean): Promise<boolean | null> {
+    const run = (this.chains.get(q.chainKey) ?? Promise.resolve()).then(() =>
+      this.execute(entry, q.send, q.cardId, batch),
+    );
+    this.chains.set(
+      q.chainKey,
+      run.then(() => undefined),
+    );
+    return run;
+  }
+
+  /**
+   * Send one command and settle its optimistic entry. True if the server accepted it, false if it did not, null if
+   * the answer no longer matters because the connection broke and the command went back to the queue.
+   */
   private async execute(
     entry: PendingEntry,
     send: () => Promise<Ack<Record<string, unknown>>>,
     cardId: string | undefined,
     batch: boolean,
-  ): Promise<boolean> {
+  ): Promise<boolean | null> {
     try {
-      return this.settle(entry, await send(), cardId, batch);
+      const ack = await send();
+      if (entry.queued) return null;
+      return this.settle(entry, ack, cardId, batch);
     } catch {
+      if (entry.queued) return null;
       this.drop(entry);
       if (!batch) this.notice('error', 'The server did not respond. Your change was undone.');
       return false;
@@ -404,41 +460,66 @@ export class BoardClient {
 
   /**
    * Send what was queued while disconnected, one command at a time and in the order it was made (a comment on a
-   * card made offline must not overtake the card). Each command carries the card version it was made against, so
-   * if someone else changed that card meanwhile the server refuses it and it is reported, never applied over theirs.
+   * card made offline must not overtake the card). A card change carries the version the user saw when making it, so
+   * if someone else changed that card meanwhile the server refuses it and it is reported instead of overwriting
+   * theirs. Changes that name no version (renames, column moves, comment edits) are applied as written: the last
+   * writer wins, as for anyone working from an out-of-date screen.
    */
   private async flushQueue(): Promise<void> {
-    if (this.flushing) return;
-    this.flushing = true;
-    let sent = 0;
-    let failed = 0;
-    try {
-      while (this.joined) {
-        const entry = this.pending.find((p) => p.queued);
-        const queued = entry?.queued;
-        if (!entry || !queued) break;
-        entry.queued = undefined;
-        this.update({});
-        sent++;
-        if (!(await this.execute(entry, queued.send, queued.cardId, true))) failed++;
-      }
-    } finally {
-      this.flushing = false;
+    if (!this.pending.some((p) => p.queued)) {
+      this.outage = false;
+      return;
     }
+    if (this.flushing) return;
+    if (this.model.role === 'viewer') {
+      const n = this.pending.filter(isWaiting).length;
+      this.pending = [];
+      this.queueBase.clear();
+      this.outage = false;
+      this.update({});
+      this.notice(
+        'error',
+        `You have view-only access to this board now, so ${n} offline ${n === 1 ? 'change was' : 'changes were'} not sent.`,
+      );
+      return;
+    }
+    this.flushing = true;
+    const gen = this.flushGen;
+    while (this.joined && gen === this.flushGen) {
+      const entry = this.pending.find((p) => p.queued);
+      const queued = entry?.queued;
+      if (!entry || !queued) break;
+      entry.origin = queued;
+      entry.queued = undefined;
+      this.update({});
+      const result = await this.chained(entry, queued, true);
+      if (gen !== this.flushGen) return; // the connection broke meanwhile: the next replay owns the queue now
+      if (result !== null) {
+        this.flushed.sent++;
+        if (!result) this.flushed.failed++;
+      }
+    }
+    if (gen !== this.flushGen) return;
+    this.flushing = false;
+    if (this.pending.some((p) => p.queued)) return; // stopped early (a re-sync is running): the next join continues
+    this.queueBase.clear();
+    this.outage = false;
+    const { sent, failed } = this.flushed;
+    this.flushed = { sent: 0, failed: 0 };
     if (sent === 0) return;
-    if (!this.pending.some((p) => p.queued)) this.queueBase.clear();
     if (failed === 0) {
       this.notice('info', sent === 1 ? '1 offline change was saved.' : `${sent} offline changes were saved.`);
     } else {
       this.notice(
         'error',
-        `${failed} of ${sent} offline ${sent === 1 ? 'change was' : 'changes were'} not applied because the board changed meanwhile (or you can no longer edit it). Showing the current board.`,
+        `${failed} of ${sent} offline ${sent === 1 ? 'change was' : 'changes were'} not applied: the board changed meanwhile, or you can no longer edit it. The board now shows what was saved.`,
       );
-      void this.join();
+      if (this.joined) void this.join();
     }
   }
 
   private settle(entry: PendingEntry, ack: Ack<Record<string, unknown>>, cardId?: string, batch = false): boolean {
+    entry.origin = undefined;
     if (ack.ok) {
       entry.ackSeq = ack.seq ?? 0;
       const version = ack.version;
