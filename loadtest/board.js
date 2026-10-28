@@ -12,6 +12,15 @@
 //   - events_missing / events_duplicate   holes or repeats in the `seq` numbers a socket received
 // and the run fails (non-zero exit) on any lost, repeated or rejected command, or on slow percentiles.
 //
+// Scenarios (all optional, combine freely; see docs/load-testing.md):
+//   STORM_AT=20       at 20 s every user drops its connection on purpose and comes back within STORM_SPREAD seconds
+//                     (a reconnect storm). Measures resync_ms and join_bytes, and checks nothing was lost.
+//   STORM_COLD=1      with STORM_AT: users come back as fresh page loads (no last seq), so each pulls a full snapshot.
+//   RECONNECT=1       an unplanned disconnect (for example `docker compose restart server-1` during the run) is an
+//                     outage to recover from instead of a failure: users reconnect, catch up and keep going.
+//   SEED_CARDS=30     each user first creates 30 cards (SEED_PER_SEC per second each), so BOARDS=1 VUS=100 gives one
+//                     board with ~3000 cards. Keep VUS x (SEED_PER_SEC + OPS_PER_SEC) near what the server can take.
+//
 // Sign-in is rate limited per IP (AUTH_RATE_LIMIT_PER_MIN, default 20), so start the stack with a higher limit:
 //   AUTH_RATE_LIMIT_PER_MIN=10000 docker compose --profile scale up -d --build --wait
 
@@ -30,8 +39,10 @@ const CURSORS_PER_SEC = Number(__ENV.CURSORS_PER_SEC || 5);
 const DRAIN_S = 3; // stop sending this long before disconnecting so the last events arrive
 const STORM_AT = Number(__ENV.STORM_AT || 0); // seconds into the run; 0 = no storm
 const STORM_SPREAD_S = Number(__ENV.STORM_SPREAD || 2);
+const STORM_COLD = ['1', 'true'].includes(String(__ENV.STORM_COLD || '')); // come back like a fresh page load: no last seq, full snapshot
 const RECONNECT = ['1', 'true'].includes(String(__ENV.RECONNECT || '')) || STORM_AT > 0;
 const SEED_CARDS = Number(__ENV.SEED_CARDS || 0); // cards each user creates before the normal mix
+const SEED_PER_SEC = Number(__ENV.SEED_PER_SEC || 5); // how fast (the server allows 20 commands/s per socket)
 const RECONNECT_GIVE_UP_S = 30; // a user that cannot get back in this long after its drop has failed
 const STEADY = !RECONNECT; // without reconnecting, a closed socket is a failure and a repeated seq is a bug
 
@@ -52,6 +63,7 @@ const joinBytes = new Trend('join_bytes'); // size of the join answer (a snapsho
 const joinsSnapshot = new Counter('joins_snapshot');
 const joinsReplay = new Counter('joins_replay');
 const reconnectFailed = new Counter('reconnect_failed');
+const scriptErrors = new Counter('script_errors'); // an exception in this script: the run proves nothing
 const opsInDoubt = new Counter('ops_in_doubt'); // sent, then the connection broke before the answer
 
 export const options = {
@@ -66,6 +78,7 @@ export const options = {
   thresholds: {
     // Correctness: nothing lost, repeated or refused. These must be exactly zero.
     connect_failures: ['count==0'],
+    script_errors: ['count==0'],
     ops_failed: ['count==0'],
     events_missing: ['count==0'],
     // A reconnect legitimately delivers an event twice (live broadcast and replay); clients drop repeats by seq.
@@ -169,13 +182,21 @@ export default function (data) {
     myCards: [], // { id, version, moving }
     seedLeft: SEED_CARDS,
     stormPending: STORM_AT > 0,
+    cold: false, // the next join sends no last seq
     finished: false,
     droppedAt: 0, // when an unplanned drop was noticed
     gaveUp: false,
   };
 
   for (let attempt = 0; ; attempt++) {
-    const outcome = connectOnce(seat, run, endAt, attempt);
+    let outcome;
+    try {
+      outcome = connectOnce(seat, run, endAt, attempt);
+    } catch (e) {
+      scriptErrors.add(1);
+      console.error(`script error: ${e}`);
+      return;
+    }
     if (outcome === 'done') break;
     if (outcome === 'dropped') {
       if (!RECONNECT) {
@@ -305,12 +326,11 @@ function connectOnce(seat, run, endAt, attempt) {
       const opsEvery = 1000 / OPS_PER_SEC;
       socket.setInterval(tick, opsEvery);
       if (run.seedLeft > 0) {
-        const seedTimer = socket.setInterval(() => {
-          if (!sending) return;
-          if (run.seedLeft <= 0) return socket.clearInterval(seedTimer);
+        socket.setInterval(() => {
+          if (!sending || run.seedLeft <= 0) return;
           run.seedLeft--;
           createCard(`seed|${run.instance}|${Date.now()}`);
-        }, 80);
+        }, 1000 / SEED_PER_SEC);
       }
       if (CURSORS_PER_SEC > 0) {
         socket.setInterval(
@@ -319,25 +339,26 @@ function connectOnce(seat, run, endAt, attempt) {
         );
       }
       const left = endAt - Date.now();
-      socket.setTimeout(() => (sending = false), Math.max(0, left - DRAIN_S * 1000));
+      socket.setTimeout(() => (sending = false), Math.max(1, left - DRAIN_S * 1000));
       socket.setTimeout(
         () => {
           run.finished = true;
           outcome = 'done';
           socket.close();
         },
-        Math.max(0, left),
+        Math.max(1, left),
       );
       if (run.stormPending) {
         const stormIn = STORM_AT * 1000 - (Date.now() - (endAt - DURATION_S * 1000));
         socket.setTimeout(
           () => {
             run.stormPending = false;
+            run.cold = STORM_COLD;
             outcome = 'storm';
             sending = false;
             socket.close();
           },
-          Math.max(0, stormIn),
+          Math.max(1, stormIn),
         );
       }
     };
@@ -349,7 +370,8 @@ function connectOnce(seat, run, endAt, attempt) {
       if (!packet) return;
       if (packet.type === '0') {
         // Connected to the namespace: join the board (with where we got to, after a reconnect).
-        const lastSeq = run.firstSeq !== null ? run.maxSeq : undefined;
+        const lastSeq = run.firstSeq !== null && !run.cold ? run.maxSeq : undefined;
+        run.cold = false;
         emit('board:join', { boardId: seat.boardId, ...(lastSeq !== undefined && { lastSeq }) }, (ack) => {
           if (!ack.ok) {
             connectFailures.add(1);

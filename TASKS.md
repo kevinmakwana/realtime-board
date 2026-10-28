@@ -76,13 +76,17 @@
 - [x] **Phase 4 closed** (2026-10-24): all six chosen items shipped in four PRs (#18 tests, #19 keyboard/touch/ARIA, #20 paging/presence/retention, #21 CD + load test). The two items below were deliberately not taken; see Someday.
 - [x] ~~**Dependency advisory**~~ (2026-10-24): `npm audit` began failing on main (body-parser 2.3.0, GHSA-27r3-jxmh-p828); fixed by the lockfile bump to 2.4.0 (#22). All dependabot PRs merged after CI re-ran on the new pipeline (Node 26 and nginx 1.31 base images, tsup 9, checkout/setup-node/upload-artifact 7, @types/node 26)
 
+- [x] ~~**Load test: reconnect storm and instance restart**~~ (2026-10-28)
+  - `STORM_AT`/`STORM_SPREAD`/`STORM_COLD`, `RECONNECT`, `SEED_CARDS` in `loadtest/board.js`: users now reconnect with their last seq, resync is timed (`resync_ms`, `join_bytes`, `outage_ms`), gaps are checked across reconnects, a script exception fails the run (`script_errors`). 3 storm runs (100 users: join answered p95 10 to 14 ms) and 3 restart-under-load runs (back in about 1 s, zero lost); CI runs a 10-user storm smoke
+  - Found while testing my own script: `socket.clearInterval` does not exist in k6, and `setTimeout(0)` throws; both crashed a VU silently until `script_errors` was added
+
 ## Waiting On
 
 ## Someday
 - [ ] **Offline command queue** - a real queue and replay; today a change made while disconnected is dropped with an honest message, not queued
 - [ ] **Websocket-only transport** - would remove the nginx sticky-session hashing, at the cost of no polling fallback
 - [ ] **Automatic deploy step** - CI publishes images to GHCR but nothing rolls them out; also image signing
-- [ ] **Load test beyond one laptop** - the reference numbers have the generator and the whole stack on one machine; repeat on separate hosts, and cover reconnect storms, instance restarts under load and very large boards
+- [ ] **Load test: one busy board, very large boards, separate hosts** - the script supports them (`BOARDS=1`, `SEED_CARDS`, `STORM_COLD`), but no clean measurement was possible (shared laptop, then its Docker engine hung). An unclean first look suggests one board with 100 users is far slower than ten boards of ten (cursor fan-out is quadratic in the people on a board); needs a quiet machine, ideally k6 on a different host
 - [ ] **Unloaded-comment `count`** is a hint (not reduced by live deletes) and a full re-snapshot forgets loaded older pages
 
 ## Done
