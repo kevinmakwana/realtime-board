@@ -12,6 +12,15 @@
 //   - events_missing / events_duplicate   holes or repeats in the `seq` numbers a socket received
 // and the run fails (non-zero exit) on any lost, repeated or rejected command, or on slow percentiles.
 //
+// Scenarios (all optional, combine freely; see docs/load-testing.md):
+//   STORM_AT=20       at 20 s every user drops its connection on purpose and comes back within STORM_SPREAD seconds
+//                     (a reconnect storm). Measures resync_ms and join_bytes, and checks nothing was lost.
+//   STORM_COLD=1      with STORM_AT: users come back as fresh page loads (no last seq), so each pulls a full snapshot.
+//   RECONNECT=1       an unplanned disconnect (for example `docker compose restart server-1` during the run) is an
+//                     outage to recover from instead of a failure: users reconnect, catch up and keep going.
+//   SEED_CARDS=30     each user first creates 30 cards (SEED_PER_SEC per second each), so BOARDS=1 VUS=100 gives one
+//                     board with ~3000 cards. Keep VUS x (SEED_PER_SEC + OPS_PER_SEC) near what the server can take.
+//
 // Sign-in is rate limited per IP (AUTH_RATE_LIMIT_PER_MIN, default 20), so start the stack with a higher limit:
 //   AUTH_RATE_LIMIT_PER_MIN=10000 docker compose --profile scale up -d --build --wait
 
@@ -28,6 +37,14 @@ const RAMP_S = Number(__ENV.RAMP || 10); // users join spread over this many sec
 const OPS_PER_SEC = Number(__ENV.OPS_PER_SEC || 2); // commands per user (the server allows 20/s per socket)
 const CURSORS_PER_SEC = Number(__ENV.CURSORS_PER_SEC || 5);
 const DRAIN_S = 3; // stop sending this long before disconnecting so the last events arrive
+const STORM_AT = Number(__ENV.STORM_AT || 0); // seconds into the run; 0 = no storm
+const STORM_SPREAD_S = Number(__ENV.STORM_SPREAD || 2);
+const STORM_COLD = ['1', 'true'].includes(String(__ENV.STORM_COLD || '')); // come back like a fresh page load: no last seq, full snapshot
+const RECONNECT = ['1', 'true'].includes(String(__ENV.RECONNECT || '')) || STORM_AT > 0;
+const SEED_CARDS = Number(__ENV.SEED_CARDS || 0); // cards each user creates before the normal mix
+const SEED_PER_SEC = Number(__ENV.SEED_PER_SEC || 5); // how fast (the server allows 20 commands/s per socket)
+const RECONNECT_GIVE_UP_S = 30; // a user that cannot get back in this long after its drop has failed
+const STEADY = !RECONNECT; // without reconnecting, a closed socket is a failure and a repeated seq is a bug
 
 const ackMs = new Trend('ack_ms', true);
 const fanoutMs = new Trend('fanout_ms', true);
@@ -40,6 +57,14 @@ const eventsMissing = new Counter('events_missing');
 const eventsDuplicate = new Counter('events_duplicate');
 const eventsOutOfOrder = new Counter('events_out_of_order');
 const historyGaps = new Counter('history_gaps');
+const resyncMs = new Trend('resync_ms', true); // new connection until its join was answered
+const outageMs = new Trend('outage_ms', true); // an unplanned drop until the user was back
+const joinBytes = new Trend('join_bytes'); // size of the join answer (a snapshot or a replay)
+const joinsSnapshot = new Counter('joins_snapshot');
+const joinsReplay = new Counter('joins_replay');
+const reconnectFailed = new Counter('reconnect_failed');
+const scriptErrors = new Counter('script_errors'); // an exception in this script: the run proves nothing
+const opsInDoubt = new Counter('ops_in_doubt'); // sent, then the connection broke before the answer
 
 export const options = {
   scenarios: {
@@ -53,9 +78,11 @@ export const options = {
   thresholds: {
     // Correctness: nothing lost, repeated or refused. These must be exactly zero.
     connect_failures: ['count==0'],
+    script_errors: ['count==0'],
     ops_failed: ['count==0'],
     events_missing: ['count==0'],
-    events_duplicate: ['count==0'],
+    // A reconnect legitimately delivers an event twice (live broadcast and replay); clients drop repeats by seq.
+    events_duplicate: STEADY ? ['count==0'] : ['count>=0'],
     history_gaps: ['count==0'],
     // The run must actually have exercised both instances.
     events_received: ['count>0'],
@@ -63,6 +90,10 @@ export const options = {
     'fanout_ms{cross_instance:true}': [`p(95)<${__ENV.FANOUT_P95_MS || 1000}`],
     'fanout_ms{cross_instance:false}': [`p(95)<${__ENV.FANOUT_P95_MS || 1000}`],
     ack_ms: [`p(95)<${__ENV.ACK_P95_MS || 500}`],
+    ...(RECONNECT && {
+      reconnect_failed: ['count==0'],
+      resync_ms: [`p(95)<${__ENV.RESYNC_P95_MS || 5000}`],
+    }),
   },
   summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
@@ -138,18 +169,69 @@ function parse(data) {
 
 export default function (data) {
   const seat = data.seats[__VU - 1];
-  const wsUrl = `${BASE_URL.replace(/^http/, 'ws')}/socket.io/?EIO=4&transport=websocket&cid=${uuid()}`;
   sleep((Math.random() * RAMP_S * 1000) / 1000); // spread the joins
 
-  const seen = new Set();
-  let joinSeq = 0;
-  let maxSeq = 0;
-  let instance = '';
+  const endAt = Date.now() + DURATION_S * 1000;
+  // What this user has learned so far; it outlives any single connection.
+  const run = {
+    seen: new Set(),
+    firstSeq: null, // seq of the first join: nothing before it is ours to account for
+    maxSeq: 0,
+    floor: 0, // everything up to here was delivered as a snapshot
+    instance: '',
+    myCards: [], // { id, version, moving }
+    seedLeft: SEED_CARDS,
+    stormPending: STORM_AT > 0,
+    cold: false, // the next join sends no last seq
+    finished: false,
+    droppedAt: 0, // when an unplanned drop was noticed
+    gaveUp: false,
+  };
+
+  for (let attempt = 0; ; attempt++) {
+    let outcome;
+    try {
+      outcome = connectOnce(seat, run, endAt, attempt);
+    } catch (e) {
+      scriptErrors.add(1);
+      console.error(`script error: ${e}`);
+      return;
+    }
+    if (outcome === 'done') break;
+    if (outcome === 'dropped') {
+      if (!RECONNECT) {
+        connectFailures.add(1);
+        break;
+      }
+      if (!run.droppedAt) run.droppedAt = Date.now();
+      if (Date.now() - run.droppedAt > RECONNECT_GIVE_UP_S * 1000) {
+        reconnectFailed.add(1);
+        break;
+      }
+      sleep(0.3 + Math.random() * 1.2); // back off like a real client would
+    } else if (outcome === 'storm') {
+      sleep(Math.random() * STORM_SPREAD_S);
+    }
+    if (Date.now() > endAt + RECONNECT_GIVE_UP_S * 1000) {
+      reconnectFailed.add(1);
+      break;
+    }
+  }
+  if (run.firstSeq !== null) {
+    // Every sequence number between where we first joined and the newest one must have arrived (or been covered by a snapshot).
+    for (let q = run.firstSeq + 1; q < run.maxSeq; q++) if (q > run.floor && !run.seen.has(q)) eventsMissing.add(1);
+  }
+}
+
+/** One connection's life. Returns 'done' (planned end), 'storm' (we hung up on purpose) or 'dropped' (it broke). */
+function connectOnce(seat, run, endAt, attempt) {
+  const wsUrl = `${BASE_URL.replace(/^http/, 'ws')}/socket.io/?EIO=4&transport=websocket&cid=${uuid()}`;
+  const startedAt = Date.now();
   let ackId = 0;
-  const pending = new Map(); // ack id -> { command, sentAt, done }
-  const myCards = []; // { id, version, moving }
   let sending = false;
-  let finished = false; // set when the planned duration is over; a close before that is a failure
+  let outcome = 'dropped';
+  let joinSize = 0;
+  const pending = new Map(); // ack id -> { command, sentAt, done }
 
   const res = ws.connect(wsUrl, {}, (socket) => {
     const emit = (name, payload, done) => {
@@ -159,11 +241,25 @@ export default function (data) {
     };
     const fire = (name, payload) => socket.send(`42${JSON.stringify([name, payload])}`);
 
+    const createCard = (title) => {
+      const c = { id: uuid(), version: 1 };
+      emit(
+        'card:create',
+        { id: c.id, boardId: seat.boardId, columnId: seat.columnIds[0], title, position: randomKey() },
+        (ack) => {
+          if (ack.ok) {
+            c.version = ack.version;
+            run.myCards.push(c);
+          }
+        },
+      );
+    };
+
     const tick = () => {
       if (!sending) return;
       const roll = Math.random();
       // Only touch a card whose last move has been acknowledged, or its version would be stale (our own conflict).
-      const idle = myCards.filter((c) => !c.moving);
+      const idle = run.myCards.filter((c) => !c.moving);
       const card = idle.length ? idle[Math.floor(Math.random() * idle.length)] : null;
       if (card && roll < 0.25) {
         const columnId = seat.columnIds[Math.floor(Math.random() * seat.columnIds.length)];
@@ -179,38 +275,91 @@ export default function (data) {
       } else if (card && roll < 0.4) {
         emit('comment:add', { id: uuid(), boardId: seat.boardId, cardId: card.id, body: `Looks good (${Date.now()})` });
       } else {
-        const c = { id: uuid(), version: 1 };
         // The title carries who made it, where, and when, so any receiver can time the fan-out.
-        const title = `lt|${instance}|${Date.now()}`;
-        emit(
-          'card:create',
-          { id: c.id, boardId: seat.boardId, columnId: seat.columnIds[0], title, position: randomKey() },
-          (ack) => {
-            if (ack.ok) {
-              c.version = ack.version;
-              myCards.push(c);
-            }
-          },
-        );
+        createCard(`lt|${run.instance}|${Date.now()}`);
       }
     };
 
-    const onEvent = (name, payload) => {
+    const onEvent = (name, payload, replayed) => {
       if (name !== 'board:event') return;
       eventsReceived.add(1);
       const { seq } = payload;
-      if (seq <= joinSeq) return; // already part of the snapshot we joined with
-      if (seen.has(seq)) eventsDuplicate.add(1);
-      else {
-        if (seq < maxSeq) eventsOutOfOrder.add(1); // legitimate across instances: clients re-sequence
-        seen.add(seq);
-        maxSeq = Math.max(maxSeq, seq);
+      if (seq <= run.floor || seq <= (run.firstSeq ?? 0)) return; // already part of a snapshot we joined with
+      if (run.seen.has(seq)) {
+        if (!replayed) eventsDuplicate.add(1);
+        return;
       }
-      if (payload.type === 'card.created' && payload.card.title.startsWith('lt|')) {
+      if (seq < run.maxSeq) eventsOutOfOrder.add(1); // legitimate across instances: clients re-sequence
+      run.seen.add(seq);
+      run.maxSeq = Math.max(run.maxSeq, seq);
+      if (!replayed && payload.type === 'card.created' && payload.card.title.startsWith('lt|')) {
         const [, creatorInstance, sentAt] = payload.card.title.split('|');
-        const cross = creatorInstance !== instance;
+        const cross = creatorInstance !== run.instance;
         if (cross) crossInstance.add(1);
         fanoutMs.add(Date.now() - Number(sentAt), { cross_instance: String(cross) });
+      }
+    };
+
+    const onJoined = (ack, bytes) => {
+      const rejoin = run.firstSeq !== null;
+      run.instance = ack.instance;
+      if (ack.mode === 'snapshot') {
+        joinsSnapshot.add(1);
+        run.floor = Math.max(run.floor, ack.snapshot.seq);
+        run.maxSeq = Math.max(run.maxSeq, ack.snapshot.seq);
+        if (!rejoin) run.firstSeq = ack.snapshot.seq;
+      } else {
+        joinsReplay.add(1);
+        for (const e of ack.events) onEvent('board:event', e, true);
+        run.maxSeq = Math.max(run.maxSeq, ack.seq);
+      }
+      if (rejoin) {
+        joinBytes.add(bytes);
+        resyncMs.add(Date.now() - startedAt, { mode: ack.mode });
+        if (run.droppedAt) outageMs.add(Date.now() - run.droppedAt);
+      } else {
+        joinBytes.add(bytes);
+      }
+      run.droppedAt = 0;
+      sending = true;
+
+      const opsEvery = 1000 / OPS_PER_SEC;
+      socket.setInterval(tick, opsEvery);
+      if (run.seedLeft > 0) {
+        socket.setInterval(() => {
+          if (!sending || run.seedLeft <= 0) return;
+          run.seedLeft--;
+          createCard(`seed|${run.instance}|${Date.now()}`);
+        }, 1000 / SEED_PER_SEC);
+      }
+      if (CURSORS_PER_SEC > 0) {
+        socket.setInterval(
+          () => sending && fire('presence:cursor', { boardId: seat.boardId, x: Math.random(), y: Math.random() }),
+          1000 / CURSORS_PER_SEC,
+        );
+      }
+      const left = endAt - Date.now();
+      socket.setTimeout(() => (sending = false), Math.max(1, left - DRAIN_S * 1000));
+      socket.setTimeout(
+        () => {
+          run.finished = true;
+          outcome = 'done';
+          socket.close();
+        },
+        Math.max(1, left),
+      );
+      if (run.stormPending) {
+        const stormIn = STORM_AT * 1000 - (Date.now() - (endAt - DURATION_S * 1000));
+        socket.setTimeout(
+          () => {
+            run.stormPending = false;
+            run.cold = STORM_COLD;
+            outcome = 'storm';
+            sending = false;
+            socket.close();
+          },
+          Math.max(1, stormIn),
+        );
       }
     };
 
@@ -220,37 +369,25 @@ export default function (data) {
       const packet = parse(raw);
       if (!packet) return;
       if (packet.type === '0') {
-        // Connected to the namespace: join the board.
-        emit('board:join', { boardId: seat.boardId }, (ack) => {
+        // Connected to the namespace: join the board (with where we got to, after a reconnect).
+        const lastSeq = run.firstSeq !== null && !run.cold ? run.maxSeq : undefined;
+        run.cold = false;
+        emit('board:join', { boardId: seat.boardId, ...(lastSeq !== undefined && { lastSeq }) }, (ack) => {
           if (!ack.ok) {
             connectFailures.add(1);
-            finished = true; // already counted
+            run.finished = true;
+            outcome = 'done';
             return socket.close();
           }
-          instance = ack.instance;
-          joinSeq = ack.snapshot.seq;
-          maxSeq = joinSeq;
-          sending = true;
-          socket.setInterval(tick, 1000 / OPS_PER_SEC);
-          if (CURSORS_PER_SEC > 0) {
-            socket.setInterval(
-              () => sending && fire('presence:cursor', { boardId: seat.boardId, x: Math.random(), y: Math.random() }),
-              1000 / CURSORS_PER_SEC,
-            );
-          }
-          socket.setTimeout(() => (sending = false), (DURATION_S - DRAIN_S) * 1000);
-          socket.setTimeout(() => {
-            // Every sequence number between where we joined and the newest one must have arrived.
-            for (let s = joinSeq + 1; s < maxSeq; s++) if (!seen.has(s)) eventsMissing.add(1);
-            finished = true;
-            socket.close();
-          }, DURATION_S * 1000);
+          onJoined(ack, joinSize);
         });
       } else if (packet.type === '4') {
         connectFailures.add(1);
+        run.finished = true;
+        outcome = 'done';
         socket.close();
       } else if (packet.type === '2') {
-        onEvent(packet.body[0], packet.body[1]);
+        onEvent(packet.body[0], packet.body[1], false);
       } else if (packet.type === '3') {
         const waiting = pending.get(packet.id);
         if (!waiting) return;
@@ -264,21 +401,31 @@ export default function (data) {
             console.error(`${waiting.command} failed: ${ack.code} ${ack.message}`);
           }
         }
+        if (waiting.command === 'board:join') joinSize = raw.length; // the answer's size on the wire
         waiting.done?.(ack);
       }
     });
     socket.on('close', () => {
-      // A socket that ends before its planned end (dropped, kicked, proxy timeout) is a failed run, and so is any
-      // command that never got an answer.
-      if (!finished) connectFailures.add(1);
-      if (pending.size > 0) opsFailed.add(pending.size);
+      // A socket that ends before its planned end (dropped, kicked, proxy timeout) is a failed run unless we are
+      // meant to recover from that; and a command that never got its answer is in doubt, or failed.
+      if (pending.size > 0) {
+        if (RECONNECT) {
+          opsInDoubt.add(pending.size);
+          // A move whose answer we never saw may or may not have happened: stop touching that card's version.
+          run.myCards = run.myCards.filter((c) => !c.moving);
+        } else opsFailed.add(pending.size);
+      }
     });
     socket.on('error', (e) => {
-      connectFailures.add(1);
+      if (!RECONNECT) connectFailures.add(1);
       console.error(`socket error: ${e.error()}`);
     });
   });
-  check(res, { 'upgraded to a WebSocket': (r) => r && r.status === 101 }) || connectFailures.add(1);
+  if (res && res.status !== 101) {
+    if (!RECONNECT || attempt === 0) connectFailures.add(1);
+  }
+  check(res, { 'upgraded to a WebSocket': (r) => r && r.status === 101 });
+  return outcome;
 }
 
 /** The database side: every board's log must be gapless, whatever the sockets saw. */
