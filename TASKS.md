@@ -88,10 +88,13 @@
   - Verified: 8 client unit tests (queue, order, version basis, chaining, drop mid-replay, limits, removal, unload guard), 2 BoardView tests, an e2e across two instances
   - Review fixes: a replay interrupted by another drop re-queues what it had sent and hands over to the next join at once (no 8 s stall); card changes are frozen to the version the user saw only after a real disconnect, not during a quick resync; deleting a column is not queued; read-only after rejoin and removal give one clear notice; the banner shows waiting changes while live too. Fake socket in tests now times out acks like socket.io
   - Not done: persisting the queue across reloads (chosen: in-memory only); renames and comment edits are last-writer-wins on replay
+- [x] ~~**Load test: reconnect storm and instance restart**~~ (2026-10-28)
+  - `STORM_AT`/`STORM_SPREAD`/`STORM_COLD`, `RECONNECT`, `SEED_CARDS` in `loadtest/board.js`: users now reconnect with their last seq, resync is timed (`resync_ms`, `join_bytes`, `outage_ms`), gaps are checked across reconnects, a script exception fails the run (`script_errors`). 3 storm runs (100 users: join answered p95 10 to 14 ms) and 3 restart-under-load runs (back in about 1 s, zero lost); CI runs a 10-user storm smoke
+  - Found while testing my own script: `socket.clearInterval` does not exist in k6, and `setTimeout(0)` throws; both crashed a VU silently until `script_errors` was added
 
 ## Waiting On
 
 ## Someday
-- [ ] **Load test beyond one laptop** - the reference numbers have the generator and the whole stack on one machine; repeat on separate hosts, and cover reconnect storms, instance restarts under load and very large boards
+- [ ] **Load test: one busy board, very large boards, separate hosts** - the script supports them (`BOARDS=1`, `SEED_CARDS`, `STORM_COLD`), but no clean measurement was possible (shared laptop, then its Docker engine hung). An unclean first look suggests one board with 100 users is far slower than ten boards of ten (cursor fan-out is quadratic in the people on a board); needs a quiet machine, ideally k6 on a different host
 
 ## Done
