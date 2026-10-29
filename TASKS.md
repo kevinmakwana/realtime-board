@@ -83,11 +83,15 @@
 - [x] ~~**Automatic deploy (optional)**~~ (2026-10-25): `.github/workflows/deploy.yml`, off until `DEPLOY_ENABLED=true`; verifies the signature, pins the host key, deploys `sha-<commit>` over SSH, checks `/ready`. Not run against a real host
 - [x] ~~**WebSocket-only build option**~~ (2026-10-25): `VITE_WS_ONLY=true` (Dockerfile build arg); default unchanged
 - [x] ~~**Node base image**~~ (2026-10-25): Dependabot had moved the image to `node:25` (odd release, not LTS, end of life) and I merged it; back on `node:22-alpine` to match CI and `engines`, and Dependabot no longer proposes Node majors
+- [x] ~~**Offline command queue**~~ (2026-10-25)
+  - In-memory queue (max 100) in `BoardClient`: a change made while disconnected shows at once and waits; on reconnect it is sent one at a time in order, each with the card version it was made against (own earlier results chain: `queueBase`), so someone else's concurrent edit makes it fail visibly instead of being overwritten. One summary notice, one resync if anything was refused. The header shows "N changes waiting"; closing the tab with a non-empty queue prompts. Changes already in flight when the connection dropped are still dropped (unknown outcome)
+  - Verified: 8 client unit tests (queue, order, version basis, chaining, drop mid-replay, limits, removal, unload guard), 2 BoardView tests, an e2e across two instances
+  - Review fixes: a replay interrupted by another drop re-queues what it had sent and hands over to the next join at once (no 8 s stall); card changes are frozen to the version the user saw only after a real disconnect, not during a quick resync; deleting a column is not queued; read-only after rejoin and removal give one clear notice; the banner shows waiting changes while live too. Fake socket in tests now times out acks like socket.io
+  - Not done: persisting the queue across reloads (chosen: in-memory only); renames and comment edits are last-writer-wins on replay
 
 ## Waiting On
 
 ## Someday
-- [ ] **Offline command queue** - a real queue and replay; today a change made while disconnected is dropped with an honest message, not queued
 - [ ] **Load test beyond one laptop** - the reference numbers have the generator and the whole stack on one machine; repeat on separate hosts, and cover reconnect storms, instance restarts under load and very large boards
 
 ## Done

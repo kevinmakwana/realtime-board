@@ -50,6 +50,7 @@ describe('accessibility (axe-core)', () => {
         cursors: [],
         selfSocketId: 's',
         role,
+        queued: 0,
       };
       const { container } = render(<BoardView client={fakeClient()} vm={vm} state={state} session={session} />);
       expect(await violations(container)).toEqual([]);

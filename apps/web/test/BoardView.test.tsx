@@ -26,7 +26,7 @@ vi.mock('../src/api', async (importOriginal) => ({
 
 const session = { token: 't', user: { id: ADA, name: 'Ada Lovelace', color: '#0091ff' } };
 
-function setup(opts: { role?: Role | null; status?: BoardViewModel['status'] } = {}) {
+function setup(opts: { role?: Role | null; status?: BoardViewModel['status']; queued?: number } = {}) {
   const cards = [
     makeCard(1, { title: 'Fix login redirect', labels: ['bug'] }),
     makeCard(2, { title: 'Write release notes', assigneeIds: [GRACE] }),
@@ -41,6 +41,7 @@ function setup(opts: { role?: Role | null; status?: BoardViewModel['status'] } =
     cursors: [],
     selfSocketId: 's1',
     role: opts.role === undefined ? 'owner' : opts.role,
+    queued: opts.queued ?? 0,
   };
   const client = fakeClient();
   render(<BoardView client={client} vm={vm} state={state} session={session} />);
@@ -81,6 +82,21 @@ describe('BoardView', () => {
   ] as const)('says so when the connection is %s', (status, text) => {
     setup({ status });
     expect(screen.getByTestId('connection')).toHaveTextContent(text);
+  });
+
+  it('says how many changes are waiting while offline', () => {
+    setup({ status: 'reconnecting', queued: 2 });
+    expect(screen.getByTestId('connection')).toHaveTextContent('Reconnecting… · 2 changes waiting');
+  });
+
+  it('also says so while live, when changes are still being sent', () => {
+    setup({ status: 'live', queued: 1 });
+    expect(screen.getByTestId('connection')).toHaveTextContent('Live on a · 1 change waiting');
+  });
+
+  it('does not mention waiting changes when there are none', () => {
+    setup({ status: 'reconnecting' });
+    expect(screen.getByTestId('connection')).not.toHaveTextContent('waiting');
   });
 
   describe('search', () => {
@@ -203,6 +219,7 @@ describe('BoardView', () => {
       cursors: [],
       selfSocketId: 's1',
       role: 'owner',
+      queued: 0,
     });
     const before = makeState(cards);
     const { rerender } = render(<BoardView client={client} vm={vm(before)} state={before} session={session} />);
@@ -308,6 +325,7 @@ function LiveBoard() {
     cursors: [],
     selfSocketId: 's1',
     role: 'owner',
+    queued: 0,
   };
   return <BoardView client={client} vm={vm} state={state} session={session} />;
 }
