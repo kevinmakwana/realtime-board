@@ -28,7 +28,27 @@ curl -fsS http://127.0.0.1/ready          # {"ok":true,...}  (nginx listens on l
 
 [`deploy/docker-compose.prod.yml`](../deploy/docker-compose.prod.yml) runs Postgres, Redis, two server instances and the web image. Compose refuses to start without `JWT_SECRET`, `POSTGRES_PASSWORD` and `WEB_ORIGIN`; the server itself refuses the public development secret when `NODE_ENV=production`. Database migrations run when a server starts, so an upgrade is `docker compose ... pull && docker compose ... up -d --wait`.
 
-Dev sign-in (`AUTH_DEV_LOGIN`) is **off** in production, so people sign in with an emailed magic link.
+Dev sign-in (`AUTH_DEV_LOGIN`) is **off** in production, so people sign in with an emailed magic link. Turn it on only for a throwaway demo (see [Public demo](#public-demo-one-small-vps-about-10-minutes)).
+
+## Public demo (one small VPS, about 10 minutes)
+
+For a link you can send to someone: one cheap Linux VM (1 vCPU / 2 GB is plenty for a demo) with Docker, ports 80 and 443 open, and a name that points at it.
+
+```bash
+git clone https://github.com/kevinmakwana/realtime-board.git && cd realtime-board
+./deploy/demo-up.sh board.example.com        # or, with no domain: ./deploy/demo-up.sh 203-0-113-7.sslip.io
+```
+
+The second form uses [sslip.io](https://sslip.io), which resolves `203-0-113-7.sslip.io` to `203.0.113.7`, so Caddy can get a real certificate for a bare IP. The script writes `deploy/.env` with fresh secrets, starts the stack with automatic HTTPS (the `tls` profile: Caddy in front of nginx), loads the demo board and prints the URL. It is safe to run again; it keeps the existing `deploy/.env` and does not seed twice. Update later with `./deploy/demo-up.sh <same name>` (it pulls the newest `latest` images).
+
+What it turns on, and what that means:
+
+- **One-click demo sign-in** (`AUTH_DEV_LOGIN=true`). Anyone can sign in as any email, so they can read and change each other's boards. That is what a demo needs, and the reason it must hold fictional data only. For a real deployment leave it off and set `SMTP_URL`.
+- **Open sign-up.** Anyone with the link can create boards. Rate limits stay on, and old events are pruned after 90 days, but nothing stops someone filling the disk. Start fresh any time with `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env --profile tls down -v` and run the script again.
+- **Not highly available.** One host, one Postgres, no backups. It shows how the two instances behave, not how to run it for customers.
+- **No secrets in the repo.** `deploy/.env` is created on the server (mode 600) and git-ignored.
+
+Checks: `curl https://<name>/ready` answers `{"ok":true,...}`, and two windows signed in as different people see each other's cards. To demonstrate the reconnect behaviour live, `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env --profile tls stop server-1` while the header shows which instance you are on (the badge reads "Live on server-1" or "server-2"), then `start` it again.
 
 ## Behind TLS
 

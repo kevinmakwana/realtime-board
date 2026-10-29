@@ -1,0 +1,6 @@
+# Used by the optional `tls` profile of docker-compose.prod.yml. Caddy gets and renews the certificate by itself.
+# WebSocket upgrades are proxied without extra configuration.
+{$DOMAIN:localhost} {
+	encode zstd gzip
+	reverse_proxy web:80
+}
