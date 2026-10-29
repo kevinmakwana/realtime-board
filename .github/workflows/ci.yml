@@ -150,6 +150,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write # keyless signing with cosign (the workflow's identity, no stored key)
     strategy:
       fail-fast: false
       matrix:
@@ -177,7 +178,11 @@ jobs:
             type=sha
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-      - uses: docker/build-push-action@v7.4.0
+      - uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: v3.1.4
+      - id: build
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           target: ${{ matrix.target }}
@@ -186,5 +191,16 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
+          sbom: true # SBOM and build provenance attestations travel with the image
+          provenance: mode=max
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
+      - name: Sign the image (by digest, keyless)
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$TAGS" | sed 's/:.*//' | sort -u | while read -r name; do
+            cosign sign --yes --recursive "${name}@${DIGEST}"
+          done

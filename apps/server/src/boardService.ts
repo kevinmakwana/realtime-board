@@ -520,17 +520,19 @@ export class BoardService {
   /** The author, or the board owner moderating. */
   async deleteComment(actorId: string, p: ClientEventPayload<'comment:delete'>): Promise<CommitResult> {
     return this.commit(p.boardId, actorId, async (tx, { role }) => {
-      const found = await tx.query('SELECT author_id FROM comments WHERE id = $1 AND board_id = $2 FOR UPDATE', [
-        p.id,
-        p.boardId,
-      ]);
+      const found = await tx.query(
+        'SELECT author_id, card_id FROM comments WHERE id = $1 AND board_id = $2 FOR UPDATE',
+        [p.id, p.boardId],
+      );
       const current = found.rows[0];
       if (!current) throw new ServiceError('NOT_FOUND', 'Comment not found');
       if (current.author_id !== actorId && role !== 'owner') {
         throw new ServiceError('FORBIDDEN', 'You can only delete your own comments');
       }
       await tx.query('DELETE FROM comments WHERE id = $1', [p.id]);
-      return { body: { type: 'comment.deleted', boardId: p.boardId, actorId, commentId: p.id } };
+      return {
+        body: { type: 'comment.deleted', boardId: p.boardId, actorId, commentId: p.id, cardId: current.card_id },
+      };
     });
   }
 

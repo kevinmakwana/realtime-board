@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import { setSession, type Session } from '../api';
 import { BoardClient, type BoardSocket } from '../lib/boardClient';
 import { pinnedNode } from '../lib/node';
+import { transportsFor } from '../lib/transport';
 import { uuid } from '../lib/uuid';
 import { navigate } from '../router';
 import { BoardView } from './BoardView';
@@ -16,7 +17,12 @@ export function BoardPage({ boardId, session }: { boardId: string; session: Sess
     // while different tabs spread across instances (hashing on IP would pin every local tab together).
     // `node` optionally pins the tab to a specific instance (see lib/node.ts).
     const node = pinnedNode();
-    const socket: BoardSocket = io({ auth: { token: session.token }, query: { cid: uuid(), ...(node && { node }) } });
+    const transports = transportsFor(import.meta.env.VITE_WS_ONLY);
+    const socket: BoardSocket = io({
+      auth: { token: session.token },
+      query: { cid: uuid(), ...(node && { node }) },
+      ...(transports && { transports }),
+    });
     // Test hook: lets Playwright sever the transport to exercise reconnect + catch-up.
     if (import.meta.env.DEV) (window as unknown as { __boardSocket?: BoardSocket }).__boardSocket = socket;
     const c = new BoardClient(socket, boardId, session.user);
