@@ -10,8 +10,8 @@ name: realtime-board
 # HTTP_BIND for a load balancer elsewhere). TRUST_PROXY defaults to 2 for that shape.
 # The nginx config of the web image names its upstreams server-1 and server-2, so keep those service names.
 
+# SERVER_IMAGE_PIN ("@sha256:...") is set by the deploy workflow so the host runs the exact digest that was verified.
 x-server: &server
-  # SERVER_IMAGE_PIN ("@sha256:...") is set by the deploy workflow so the host runs the exact digest that was verified.
   image: ${IMAGE_PREFIX:-ghcr.io/kevinmakwana/realtime-board}-server:${IMAGE_TAG:-latest}${SERVER_IMAGE_PIN:-}
   restart: unless-stopped
   environment: &server-env

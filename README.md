@@ -9,7 +9,7 @@ A collaborative kanban board where several people edit the same board at once an
 
 ![Two browser windows, connected to server-1 and server-2, syncing the same board](docs/demo.gif)
 
-*Left window: connected to `server-1`. Right window: connected to `server-2`. Same board, synced through Redis.*
+_Left window: connected to `server-1`. Right window: connected to `server-2`. Same board, synced through Redis._
 
 ## What it does
 
@@ -101,11 +101,11 @@ npm run demo:gif             # re-record docs/demo.gif against the scale profile
 npm run loadtest             # k6 against the scale profile; see docs/load-testing.md
 ```
 
-| Layer | What it proves |
-| --- | --- |
-| Unit | event schema validation, fractional ordering and collision handling, reducer idempotency, sequence reordering, optimistic apply and rollback, cursor throttling, token bucket |
+| Layer       | What it proves                                                                                                                                                                                                       |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unit        | event schema validation, fractional ordering and collision handling, reducer idempotency, sequence reordering, optimistic apply and rollback, cursor throttling, token bucket                                        |
 | Integration | an event committed on instance A reaches a client on instance B; stale versions are rejected; gapless `seq` under 24 concurrent writers on two instances; replay and snapshot fallback on reconnect; presence expiry |
-| End to end | two Chromium contexts on two instances: live sync, drag and drop ordering, "is editing", comments, cursors, and recovery after the transport is cut |
+| End to end  | two Chromium contexts on two instances: live sync, drag and drop ordering, "is editing", comments, cursors, and recovery after the transport is cut                                                                  |
 
 ## Event protocol
 
@@ -113,33 +113,33 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 
 ### Client to server
 
-| Event | Payload | Ack | Notes |
-| --- | --- | --- | --- |
-| `board:join` | `{ boardId, lastSeq? }` | `{ mode: 'snapshot', snapshot }` or `{ mode: 'replay', events, seq }`, plus `instance`, `presence`, `role` | Joins the room first, then reads state. Replays only if the log is contiguous and within `REPLAY_MAX_EVENTS`. Non-members get `NOT_FOUND`. |
-| `board:leave` | `{ boardId }` | `{}` | |
-| `board:rename` | `{ boardId, name }` | `{ seq }` | Owner only (`FORBIDDEN` otherwise). Renaming to the current name writes nothing. |
-| `column:create` | `{ id, boardId, name, position }` | `{ seq }` | Client-generated ids make retries idempotent. |
-| `column:rename` | `{ id, boardId, name }` | `{ seq }` | |
-| `column:move` | `{ id, boardId, position }` | `{ seq }` | Reorder. Answered with a `column.updated` event. A position someone else just took is nudged to a free key next to it. |
-| `column:delete` | `{ id, boardId }` | `{ seq }` | Cascades to its cards. |
-| `card:create` | `{ id, boardId, columnId, title, position }` | `{ seq, version }` | |
-| `card:update` | `{ id, boardId, baseVersion, title?, description?, dueDate?, assigneeIds?, labels? }` | `{ seq, version }` | `VERSION_CONFLICT` if `baseVersion` is stale. `dueDate` is `YYYY-MM-DD` or `null` to clear; `assigneeIds` (max 10) must all be board members; `labels` (max 5, 24 chars) are de-duplicated ignoring case. Omitted fields are left alone. |
-| `card:move` | `{ id, boardId, baseVersion, columnId, position }` | `{ seq, version }` | Same version check. `position` is a fractional key. |
-| `card:delete` | `{ id, boardId, baseVersion }` | `{ seq }` | Same version check. |
-| `comment:add` | `{ id, boardId, cardId, body }` | `{ seq }` | |
-| `comment:edit` | `{ id, boardId, body }` | `{ seq }` | Author only (`FORBIDDEN` otherwise, even for the board owner). Saving the same text writes nothing. |
-| `comment:delete` | `{ id, boardId }` | `{ seq }` | The author, or the board owner moderating. |
-| `presence:editing` | `{ boardId, cardId \| null }` | `{}` | Stored in Redis with the member record. |
-| `presence:cursor` | `{ boardId, x, y }` (0 to 1) | none | Fire and forget, volatile, rate limited separately. |
+| Event              | Payload                                                                               | Ack                                                                                                        | Notes                                                                                                                                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `board:join`       | `{ boardId, lastSeq? }`                                                               | `{ mode: 'snapshot', snapshot }` or `{ mode: 'replay', events, seq }`, plus `instance`, `presence`, `role` | Joins the room first, then reads state. Replays only if the log is contiguous and within `REPLAY_MAX_EVENTS`. Non-members get `NOT_FOUND`.                                                                                               |
+| `board:leave`      | `{ boardId }`                                                                         | `{}`                                                                                                       |                                                                                                                                                                                                                                          |
+| `board:rename`     | `{ boardId, name }`                                                                   | `{ seq }`                                                                                                  | Owner only (`FORBIDDEN` otherwise). Renaming to the current name writes nothing.                                                                                                                                                         |
+| `column:create`    | `{ id, boardId, name, position }`                                                     | `{ seq }`                                                                                                  | Client-generated ids make retries idempotent.                                                                                                                                                                                            |
+| `column:rename`    | `{ id, boardId, name }`                                                               | `{ seq }`                                                                                                  |                                                                                                                                                                                                                                          |
+| `column:move`      | `{ id, boardId, position }`                                                           | `{ seq }`                                                                                                  | Reorder. Answered with a `column.updated` event. A position someone else just took is nudged to a free key next to it.                                                                                                                   |
+| `column:delete`    | `{ id, boardId }`                                                                     | `{ seq }`                                                                                                  | Cascades to its cards.                                                                                                                                                                                                                   |
+| `card:create`      | `{ id, boardId, columnId, title, position }`                                          | `{ seq, version }`                                                                                         |                                                                                                                                                                                                                                          |
+| `card:update`      | `{ id, boardId, baseVersion, title?, description?, dueDate?, assigneeIds?, labels? }` | `{ seq, version }`                                                                                         | `VERSION_CONFLICT` if `baseVersion` is stale. `dueDate` is `YYYY-MM-DD` or `null` to clear; `assigneeIds` (max 10) must all be board members; `labels` (max 5, 24 chars) are de-duplicated ignoring case. Omitted fields are left alone. |
+| `card:move`        | `{ id, boardId, baseVersion, columnId, position }`                                    | `{ seq, version }`                                                                                         | Same version check. `position` is a fractional key.                                                                                                                                                                                      |
+| `card:delete`      | `{ id, boardId, baseVersion }`                                                        | `{ seq }`                                                                                                  | Same version check.                                                                                                                                                                                                                      |
+| `comment:add`      | `{ id, boardId, cardId, body }`                                                       | `{ seq }`                                                                                                  |                                                                                                                                                                                                                                          |
+| `comment:edit`     | `{ id, boardId, body }`                                                               | `{ seq }`                                                                                                  | Author only (`FORBIDDEN` otherwise, even for the board owner). Saving the same text writes nothing.                                                                                                                                      |
+| `comment:delete`   | `{ id, boardId }`                                                                     | `{ seq }`                                                                                                  | The author, or the board owner moderating.                                                                                                                                                                                               |
+| `presence:editing` | `{ boardId, cardId \| null }`                                                         | `{}`                                                                                                       | Stored in Redis with the member record.                                                                                                                                                                                                  |
+| `presence:cursor`  | `{ boardId, x, y }` (0 to 1)                                                          | none                                                                                                       | Fire and forget, volatile, rate limited separately.                                                                                                                                                                                      |
 
 ### Server to client
 
-| Event | Payload | Notes |
-| --- | --- | --- |
-| `board:event` | `{ seq, type, boardId, actorId, ts, ... }` | One per committed change, sent to every socket in the board room on every instance. |
-| `presence:update` | `{ boardId, members[] }` | Full roster: socket, user, instance, `editingCardId`. |
-| `presence:cursor` | `{ socketId, userId, boardId, x, y }` | Not sent back to the sender. |
-| `board:access` | `{ boardId, role }` | Your role changed; `role` is `null` when you were removed from the board (the server also takes you out of its room). |
+| Event             | Payload                                    | Notes                                                                                                                 |
+| ----------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `board:event`     | `{ seq, type, boardId, actorId, ts, ... }` | One per committed change, sent to every socket in the board room on every instance.                                   |
+| `presence:update` | `{ boardId, members[] }`                   | Full roster: socket, user, instance, `editingCardId`.                                                                 |
+| `presence:cursor` | `{ socketId, userId, boardId, x, y }`      | Not sent back to the sender.                                                                                          |
+| `board:access`    | `{ boardId, role }`                        | Your role changed; `role` is `null` when you were removed from the board (the server also takes you out of its room). |
 
 `board:event` types: `board.renamed`, `column.created`, `column.updated`, `column.deleted`, `card.created`, `card.updated`, `card.moved`, `card.deleted`, `comment.added`, `comment.updated`, `comment.deleted`. Card events carry the full card, so applying them is idempotent.
 
@@ -147,38 +147,38 @@ All client commands are Socket.IO events with an acknowledgement callback. Paylo
 
 Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message }`.
 
-| Code | Meaning |
-| --- | --- |
-| `VALIDATION` | Payload failed the zod schema (the message lists the fields). |
-| `VERSION_CONFLICT` | Someone changed the card first. The ack includes `current` so the client can resync. |
-| `NOT_FOUND` | Board, column or card does not exist (or was just deleted), or you are not a member of the board. |
-| `FORBIDDEN` | You are a viewer and tried to write. |
-| `NOT_JOINED` | The socket has not joined that board. |
-| `RATE_LIMITED` | The socket's token bucket is empty. |
-| `UNAUTHORIZED` | Handshake rejected (bad or missing JWT). |
-| `INTERNAL` | Unexpected server error (logged, not leaked). |
+| Code               | Meaning                                                                                           |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| `VALIDATION`       | Payload failed the zod schema (the message lists the fields).                                     |
+| `VERSION_CONFLICT` | Someone changed the card first. The ack includes `current` so the client can resync.              |
+| `NOT_FOUND`        | Board, column or card does not exist (or was just deleted), or you are not a member of the board. |
+| `FORBIDDEN`        | You are a viewer and tried to write.                                                              |
+| `NOT_JOINED`       | The socket has not joined that board.                                                             |
+| `RATE_LIMITED`     | The socket's token bucket is empty.                                                               |
+| `UNAUTHORIZED`     | Handshake rejected (bad or missing JWT).                                                          |
+| `INTERNAL`         | Unexpected server error (logged, not leaked).                                                     |
 
 ### REST
 
-| Route | Purpose |
-| --- | --- |
-| `POST /api/auth/dev-login` | `{ email, name? }` returns a JWT. Disabled when `NODE_ENV=production` unless `AUTH_DEV_LOGIN=true`. All `/api/auth/*` routes answer `429` with `Retry-After` when rate limited. |
-| `POST /api/auth/magic-link` | `{ email }` emails a single-use sign-in link (printed to the server console when no SMTP server is configured). Always answers `{ ok: true }`, whether or not the email could be delivered. |
-| `POST /api/auth/verify` | `{ token }` exchanges a magic-link token for a JWT. |
-| `GET /api/boards?limit=50&before=<cursor>`, `POST /api/boards` | One page of your boards, newest first, each with your `role`: `{ boards, nextCursor }` (`limit` 1 to 100; pass `nextCursor` as `before` for the next page, `null` on the last). Or create one (new boards get To do, In progress, Done; the creator is the owner). |
-| `GET /api/boards/:id` | Snapshot with its `seq`. Members only; anyone else gets `404`. |
-| `GET /api/boards/:id/events?after=N` | Event log slice. Members only. `410` when the log before `N` has been pruned (see retention below): load a snapshot instead. |
-| `GET /api/boards/:id/cards/:cardId/comments?before=<cursor>&limit=50` | A page of older comments, oldest first: `{ comments, nextCursor }`. Members only, viewers included. The snapshot carries only the newest 50 comments of each card plus, in `olderComments`, how many are missing and the first cursor. |
-| `GET /api/boards/:id/activity?limit=50` | The latest changes as readable lines (`{ entries: [{ seq, ts, actorName, text }] }`), newest first. Members only, viewers included. `limit` is clamped to 200. Built from the event log by `describeActivity` in `packages/shared`. |
-| `GET /api/boards/:id/members` | Members with names, colours and roles. The owner also gets emails and pending invites. |
-| `POST /api/boards/:id/members` | Owner only. `{ email, role: 'editor' \| 'viewer' }`. An existing user is added at once, anyone else gets a pending invite. |
-| `PATCH /api/boards/:id/members/:userId` | Owner only. `{ role }`. The owner's own role cannot change. |
-| `DELETE /api/boards/:id` | Owner only. Deletes the board with its columns, cards, comments, event log, members and invites (waiting for any command already running), and cuts every member's open tabs off. |
-| `DELETE /api/boards/:id/members/:userId` | The owner removes anyone but themselves; any other member can remove themselves (leave). |
-| `DELETE /api/boards/:id/invites/:email` | Owner only. Withdraw a pending invite. |
-| `GET /health` | Liveness: `{ ok, instance }`. Touches no dependency. |
-| `GET /ready` | Readiness: pings Postgres and Redis (2 s deadline each). `200` with `{ ok: true, checks }`, or `503` naming the dependency that failed. The compose healthchecks use it. |
-| `GET /metrics` | Prometheus text: process metrics, `http_requests_total`, `http_request_duration_seconds`, `ws_connections`, `board_commands_total{command,result}` and `board_command_duration_seconds`, all labelled with the instance. nginx does not proxy it, so scrape each instance directly. |
+| Route                                                                 | Purpose                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/auth/dev-login`                                            | `{ email, name? }` returns a JWT. Disabled when `NODE_ENV=production` unless `AUTH_DEV_LOGIN=true`. All `/api/auth/*` routes answer `429` with `Retry-After` when rate limited.                                                                                                     |
+| `POST /api/auth/magic-link`                                           | `{ email }` emails a single-use sign-in link (printed to the server console when no SMTP server is configured). Always answers `{ ok: true }`, whether or not the email could be delivered.                                                                                         |
+| `POST /api/auth/verify`                                               | `{ token }` exchanges a magic-link token for a JWT.                                                                                                                                                                                                                                 |
+| `GET /api/boards?limit=50&before=<cursor>`, `POST /api/boards`        | One page of your boards, newest first, each with your `role`: `{ boards, nextCursor }` (`limit` 1 to 100; pass `nextCursor` as `before` for the next page, `null` on the last). Or create one (new boards get To do, In progress, Done; the creator is the owner).                  |
+| `GET /api/boards/:id`                                                 | Snapshot with its `seq`. Members only; anyone else gets `404`.                                                                                                                                                                                                                      |
+| `GET /api/boards/:id/events?after=N`                                  | Event log slice. Members only. `410` when the log before `N` has been pruned (see retention below): load a snapshot instead.                                                                                                                                                        |
+| `GET /api/boards/:id/cards/:cardId/comments?before=<cursor>&limit=50` | A page of older comments, oldest first: `{ comments, nextCursor }`. Members only, viewers included. The snapshot carries only the newest 50 comments of each card plus, in `olderComments`, how many are missing and the first cursor.                                              |
+| `GET /api/boards/:id/activity?limit=50`                               | The latest changes as readable lines (`{ entries: [{ seq, ts, actorName, text }] }`), newest first. Members only, viewers included. `limit` is clamped to 200. Built from the event log by `describeActivity` in `packages/shared`.                                                 |
+| `GET /api/boards/:id/members`                                         | Members with names, colours and roles. The owner also gets emails and pending invites.                                                                                                                                                                                              |
+| `POST /api/boards/:id/members`                                        | Owner only. `{ email, role: 'editor' \| 'viewer' }`. An existing user is added at once, anyone else gets a pending invite.                                                                                                                                                          |
+| `PATCH /api/boards/:id/members/:userId`                               | Owner only. `{ role }`. The owner's own role cannot change.                                                                                                                                                                                                                         |
+| `DELETE /api/boards/:id`                                              | Owner only. Deletes the board with its columns, cards, comments, event log, members and invites (waiting for any command already running), and cuts every member's open tabs off.                                                                                                   |
+| `DELETE /api/boards/:id/members/:userId`                              | The owner removes anyone but themselves; any other member can remove themselves (leave).                                                                                                                                                                                            |
+| `DELETE /api/boards/:id/invites/:email`                               | Owner only. Withdraw a pending invite.                                                                                                                                                                                                                                              |
+| `GET /health`                                                         | Liveness: `{ ok, instance }`. Touches no dependency.                                                                                                                                                                                                                                |
+| `GET /ready`                                                          | Readiness: pings Postgres and Redis (2 s deadline each). `200` with `{ ok: true, checks }`, or `503` naming the dependency that failed. The compose healthchecks use it.                                                                                                            |
+| `GET /metrics`                                                        | Prometheus text: process metrics, `http_requests_total`, `http_request_duration_seconds`, `ws_connections`, `board_commands_total{command,result}` and `board_command_duration_seconds`, all labelled with the instance. nginx does not proxy it, so scrape each instance directly. |
 
 ## Scaling notes
 
@@ -186,7 +186,7 @@ Success is `{ ok: true, seq, version? }`. Failure is `{ ok: false, code, message
 - **Presence broadcasts.** "Is editing" changes re-send the roster to the board; per board that is at most one every `PRESENCE_BROADCAST_MIN_MS`, the first immediately and the last state always. `Presence.setEditing` is one atomic Redis script, so it cannot resurrect a member who left meanwhile.
 
 - **Fan-out.** Every instance publishes to and subscribes from Redis through `@socket.io/redis-adapter`, so `io.to(room).emit` reaches sockets on any instance. Postgres is the only writer of truth, and Redis is never required to be durable.
-- **Ordering.** Writers on the same board are serialised by a row lock (`SELECT ... FOR UPDATE`), so `last_seq + 1` is gapless and commit order is `seq` order. Two instances can still *publish* seq 5 and 6 in the opposite order. Clients hold back anything past `lastSeq + 1` and, if the hole does not fill within 400 ms, rejoin with their `lastSeq` to fetch it.
+- **Ordering.** Writers on the same board are serialised by a row lock (`SELECT ... FOR UPDATE`), so `last_seq + 1` is gapless and commit order is `seq` order. Two instances can still _publish_ seq 5 and 6 in the opposite order. Clients hold back anything past `lastSeq + 1` and, if the hole does not fill within 400 ms, rejoin with their `lastSeq` to fetch it.
 - **Why a log and not just pub/sub.** Redis pub/sub is at-most-once. A client that is offline, or just briefly disconnected, would silently miss events. The Postgres event log is what makes catch-up exact. Past `REPLAY_MAX_EVENTS` (500) a snapshot is cheaper than a replay, so the server sends that instead.
 - **Offline queue details.** Only card changes are version-checked. Renames, column moves and comment edits carry no version, so a replay applies them as written (the last writer wins), and deleting a column is refused while offline because it would also delete cards others added meanwhile. A change the replay had sent when the connection dropped again goes back in the queue and is sent again on the next join (creates are safe to repeat; a card change that had in fact landed is refused as a conflict and the board resyncs to show it). Changes that were in flight when the first drop happened have an unknown outcome and are dropped from the view; catch-up shows what really happened.
 - **Conflicts.** Version checks are optimistic concurrency, not merging. The second of two concurrent edits to one card is rejected with the current card and the client resyncs. Concurrent drops into the same gap are resolved server-side: the later key is moved to sit directly after the colliding one.
@@ -212,29 +212,29 @@ docker/         nginx config for the scale profile
 
 ## Configuration
 
-| Variable | Default | |
-| --- | --- | --- |
-| `PORT` | `3001` | HTTP + Socket.IO port |
-| `INSTANCE_ID` | `server-1` | Shown in the UI and `/health` |
-| `DATABASE_URL` | `postgres://board:board@localhost:5434/board` | |
-| `REDIS_URL` | `redis://localhost:6381` | |
-| `PG_POOL_MAX` | `10` | Postgres connections per instance; every write holds one for its transaction. Keep instances × this below Postgres' `max_connections` |
-| `JWT_SECRET` | `dev-only-change-me` | The server refuses to start with this value when `NODE_ENV=production` |
-| `COMPOSE_JWT_SECRET` | demo value | Compose only: the secret used by the `scale` profile (it runs with `NODE_ENV=production`) |
-| `TRUST_PROXY` | `0` | Number of reverse proxies in front of the server (nginx = 1). Needed for per-client rate limits to see real IPs |
-| `AUTH_RATE_LIMIT_PER_MIN` | `20` | Requests per client IP per minute across `/api/auth/*` |
-| `MAGIC_LINK_PER_EMAIL_PER_HOUR` | `5` | Magic links one address can be sent per hour |
-| `LOG_FORMAT` | `json` in production, `text` otherwise | Log line format |
-| `SMTP_URL` | unset | For example `smtp://user:pass@smtp.example.com:587` (`smtps://` for TLS). Unset: emails are printed to the log. The server warns at start-up if this is unset in production |
-| `MAIL_FROM` | `Realtime Board <no-reply@localhost>` | The From address of sign-in and invitation emails |
-| `PRESENCE_TTL_SECONDS` | `30` | |
-| `PRESENCE_BROADCAST_MIN_MS` | `150` | Minimum gap between roster broadcasts caused by "is editing" changes, per board (0 sends every one) |
-| `EVENT_RETENTION_DAYS` | `90` | Board events older than this may be pruned. `0` keeps everything |
-| `EVENT_RETENTION_MIN_EVENTS` | `1000` | Each board always keeps at least this many of its newest events (minimum 500) |
-| `RETENTION_INTERVAL_MINUTES` | `60` | How often each instance tries to prune; `0` never |
-| `RATE_LIMIT_PER_SEC` / `RATE_LIMIT_BURST` | `20` / `40` | Commands per socket |
-| `CURSOR_RATE_PER_SEC` | `30` | |
-| `REPLAY_MAX_EVENTS` | `500` | Replay window before falling back to a snapshot |
+| Variable                                  | Default                                       |                                                                                                                                                                             |
+| ----------------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                                    | `3001`                                        | HTTP + Socket.IO port                                                                                                                                                       |
+| `INSTANCE_ID`                             | `server-1`                                    | Shown in the UI and `/health`                                                                                                                                               |
+| `DATABASE_URL`                            | `postgres://board:board@localhost:5434/board` |                                                                                                                                                                             |
+| `REDIS_URL`                               | `redis://localhost:6381`                      |                                                                                                                                                                             |
+| `PG_POOL_MAX`                             | `10`                                          | Postgres connections per instance; every write holds one for its transaction. Keep instances × this below Postgres' `max_connections`                                       |
+| `JWT_SECRET`                              | `dev-only-change-me`                          | The server refuses to start with this value when `NODE_ENV=production`                                                                                                      |
+| `COMPOSE_JWT_SECRET`                      | demo value                                    | Compose only: the secret used by the `scale` profile (it runs with `NODE_ENV=production`)                                                                                   |
+| `TRUST_PROXY`                             | `0`                                           | Number of reverse proxies in front of the server (nginx = 1). Needed for per-client rate limits to see real IPs                                                             |
+| `AUTH_RATE_LIMIT_PER_MIN`                 | `20`                                          | Requests per client IP per minute across `/api/auth/*`                                                                                                                      |
+| `MAGIC_LINK_PER_EMAIL_PER_HOUR`           | `5`                                           | Magic links one address can be sent per hour                                                                                                                                |
+| `LOG_FORMAT`                              | `json` in production, `text` otherwise        | Log line format                                                                                                                                                             |
+| `SMTP_URL`                                | unset                                         | For example `smtp://user:pass@smtp.example.com:587` (`smtps://` for TLS). Unset: emails are printed to the log. The server warns at start-up if this is unset in production |
+| `MAIL_FROM`                               | `Realtime Board <no-reply@localhost>`         | The From address of sign-in and invitation emails                                                                                                                           |
+| `PRESENCE_TTL_SECONDS`                    | `30`                                          |                                                                                                                                                                             |
+| `PRESENCE_BROADCAST_MIN_MS`               | `150`                                         | Minimum gap between roster broadcasts caused by "is editing" changes, per board (0 sends every one)                                                                         |
+| `EVENT_RETENTION_DAYS`                    | `90`                                          | Board events older than this may be pruned. `0` keeps everything                                                                                                            |
+| `EVENT_RETENTION_MIN_EVENTS`              | `1000`                                        | Each board always keeps at least this many of its newest events (minimum 500)                                                                                               |
+| `RETENTION_INTERVAL_MINUTES`              | `60`                                          | How often each instance tries to prune; `0` never                                                                                                                           |
+| `RATE_LIMIT_PER_SEC` / `RATE_LIMIT_BURST` | `20` / `40`                                   | Commands per socket                                                                                                                                                         |
+| `CURSOR_RATE_PER_SEC`                     | `30`                                          |                                                                                                                                                                             |
+| `REPLAY_MAX_EVENTS`                       | `500`                                         | Replay window before falling back to a snapshot                                                                                                                             |
 
 All people, emails and cards in the demo data are fictional (`@example.test`).
 
