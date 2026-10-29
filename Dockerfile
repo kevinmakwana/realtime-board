@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:25-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
@@ -9,10 +9,12 @@ RUN npm ci
 COPY tsconfig.base.json ./
 COPY packages packages
 COPY apps apps
-RUN npm run build -w apps/server && npm run build -w apps/web
+# Set to true to build a web app that connects over WebSocket only (no polling fallback, no sticky sessions needed).
+ARG VITE_WS_ONLY=false
+RUN npm run build -w apps/server && VITE_WS_ONLY=$VITE_WS_ONLY npm run build -w apps/web
 
 # ---- API + Socket.IO instance ----
-FROM node:25-alpine AS server
+FROM node:22-alpine AS server
 WORKDIR /app
 ENV NODE_ENV=production
 # The server bundle inlines @board/shared, so only third-party runtime deps are installed.

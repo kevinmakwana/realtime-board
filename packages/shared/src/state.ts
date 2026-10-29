@@ -14,7 +14,11 @@ import {
  * What the client knows about a card's unsent comments: the server's record, plus what live events said about
  * comments that are not loaded. A page read from the database may predate such an event, so on merge the event wins.
  */
-export type OlderEntry = OlderComments[string] & { touched?: Record<string, Comment | null> };
+export type OlderEntry = OlderComments[string] & {
+  touched?: Record<string, Comment | null>;
+  /** Deleted ids whose delete event did not name its card, so they have not been taken off `count`. */
+  uncounted?: Record<string, true>;
+};
 
 /** Authoritative board state: only ever changed by sequenced server events. */
 export interface BoardState {
@@ -104,13 +108,25 @@ export function applyEvent(state: BoardState, e: BoardEvent): BoardState {
       const { [e.commentId]: removed, ...comments } = state.comments;
       next.comments = comments;
       if (!removed) {
-        // The event does not say which card it belonged to, so remember it for every card with unloaded comments.
-        next.olderComments = Object.fromEntries(
-          Object.entries(state.olderComments).map(([cardId, entry]) => [
-            cardId,
-            { ...entry, touched: { ...entry.touched, [e.commentId]: null } },
-          ]),
-        );
+        // Not loaded, so it is one of the unsent ones: remember it for the page that may still contain it. When the
+        // event names the card, only that card is touched and it has one fewer unloaded comment. Older log entries
+        // do not name it, so every card with unloaded comments remembers the id and no count changes.
+        const forget = (entry: OlderEntry, counted: boolean): OlderEntry => ({
+          ...entry,
+          touched: { ...entry.touched, [e.commentId]: null },
+          ...(!counted && { uncounted: { ...entry.uncounted, [e.commentId]: true as const } }),
+        });
+        const entry = e.cardId ? state.olderComments[e.cardId] : undefined;
+        if (e.cardId && entry) {
+          next.olderComments = {
+            ...state.olderComments,
+            [e.cardId]: { ...forget(entry, true), count: Math.max(0, entry.count - 1) },
+          };
+        } else if (!e.cardId) {
+          next.olderComments = Object.fromEntries(
+            Object.entries(state.olderComments).map(([cardId, o]) => [cardId, forget(o, false)]),
+          );
+        }
       }
       break;
     }
@@ -135,10 +151,14 @@ export function mergeOlderComments(
   const entry = state.olderComments[cardId];
   if (!entry || entry.cursor !== requestCursor) return state;
   const comments = { ...state.comments };
+  let alreadyCounted = 0; // deleted live since the page was read: the count dropped when that event arrived
   for (const c of page) {
     if (c.cardId !== cardId || comments[c.id]) continue;
     const live = entry.touched?.[c.id];
-    if (live === null) continue; // deleted since the page was read
+    if (live === null) {
+      if (!entry.uncounted?.[c.id]) alreadyCounted++;
+      continue;
+    }
     comments[c.id] = live ?? c;
   }
   const { [cardId]: _done, ...others } = state.olderComments;
@@ -146,9 +166,10 @@ export function mergeOlderComments(
     ? {
         ...others,
         [cardId]: {
-          count: Math.max(0, entry.count - page.length),
+          count: Math.max(0, entry.count - (page.length - alreadyCounted)),
           cursor: nextCursor,
           ...(entry.touched && { touched: entry.touched }),
+          ...(entry.uncounted && { uncounted: entry.uncounted }),
         },
       }
     : others;

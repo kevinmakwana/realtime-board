@@ -100,11 +100,15 @@ describe('comment edit and delete', () => {
 
   describe('delete', () => {
     it('lets the author delete their comment, for everyone', async () => {
-      const { snap, commentId, sa, se } = await scene();
+      const { snap, cardId, commentId, sa, se } = await scene();
       const seen = collectEvents(sa);
       expect(await emit(se, 'comment:delete', { id: commentId, boardId: snap.board.id })).toMatchObject({ ok: true });
       await expect.poll(() => seen.some((e) => e.type === 'comment.deleted'), { timeout: 5000 }).toBe(true);
-      expect(seen.find((e) => e.type === 'comment.deleted')).toMatchObject({ type: 'comment.deleted', commentId });
+      expect(seen.find((e) => e.type === 'comment.deleted')).toMatchObject({
+        type: 'comment.deleted',
+        commentId,
+        cardId, // lets clients keep their count of unloaded comments right
+      });
       expect((await world.service.getSnapshot(snap.board.id))?.comments).toEqual([]);
     });
 
