@@ -127,6 +127,34 @@ test('a client that loses its connection catches up on everything it missed', as
   await close();
 });
 
+test('changes made while offline are kept, shown at once, and sent when the connection returns', async ({
+  browser,
+}) => {
+  const { ada, grace, close } = await openSharedBoard(browser);
+  await addCard(ada, 'To do', 'Existing');
+  await expect(cardsIn(grace, 'To do')).toHaveCount(1);
+
+  await grace.evaluate(() => {
+    const s = (window as any).__boardSocket;
+    s.io.reconnectionDelay(8000).randomizationFactor(0);
+    s.io.engine.close();
+  });
+  await expect(grace.getByTestId('connection')).toContainText('Reconnecting');
+
+  // Grace keeps working while offline: it appears for her straight away, and the header says it is waiting.
+  await addCard(grace, 'To do', 'Written offline');
+  await expect(cardsIn(grace, 'To do')).toHaveCount(2);
+  await expect(grace.getByTestId('connection')).toContainText('1 change waiting');
+  await expect(cardsIn(ada, 'To do')).toHaveCount(1); // Ada cannot see it yet
+
+  // The connection comes back: it is sent, and Ada receives it.
+  await expect(grace.getByTestId('connection')).toContainText('Live on', { timeout: 30_000 });
+  await expect(cardsIn(ada, 'To do')).toHaveText([/Existing/, /Written offline/]);
+  await expect(grace.getByTestId('connection')).not.toContainText('waiting');
+
+  await close();
+});
+
 test('an unauthenticated visitor is sent to sign in, and magic-link tokens are single use', async ({
   page,
   request,
