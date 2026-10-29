@@ -29,7 +29,7 @@ export const boardEventSchema = z.discriminatedUnion('type', [
   z.object({ ...eventBase, type: z.literal('card.deleted'), cardId: idSchema }),
   z.object({ ...eventBase, type: z.literal('comment.added'), comment: commentSchema }),
   z.object({ ...eventBase, type: z.literal('comment.updated'), comment: commentSchema }),
-  z.object({ ...eventBase, type: z.literal('comment.deleted'), commentId: idSchema }),
+  z.object({ ...eventBase, type: z.literal('comment.deleted'), commentId: idSchema, cardId: idSchema.optional() }),
 ]);
 export type BoardEvent = z.infer<typeof boardEventSchema>;
 export type BoardEventType = BoardEvent['type'];

@@ -11,7 +11,8 @@ name: realtime-board
 # The nginx config of the web image names its upstreams server-1 and server-2, so keep those service names.
 
 x-server: &server
-  image: ${IMAGE_PREFIX:-ghcr.io/kevinmakwana/realtime-board}-server:${IMAGE_TAG:-latest}
+  # SERVER_IMAGE_PIN ("@sha256:...") is set by the deploy workflow so the host runs the exact digest that was verified.
+  image: ${IMAGE_PREFIX:-ghcr.io/kevinmakwana/realtime-board}-server:${IMAGE_TAG:-latest}${SERVER_IMAGE_PIN:-}
   restart: unless-stopped
   environment: &server-env
     NODE_ENV: production # the image sets it too; JWT_SECRET must then be private, and dev sign-in is off
@@ -49,7 +50,7 @@ services:
       INSTANCE_ID: server-2
 
   web:
-    image: ${IMAGE_PREFIX:-ghcr.io/kevinmakwana/realtime-board}-web:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-ghcr.io/kevinmakwana/realtime-board}-web:${IMAGE_TAG:-latest}${WEB_IMAGE_PIN:-}
     restart: unless-stopped
     ports:
       # Loopback by default: TLS terminates in front of nginx. If the terminator is on another host, set HTTP_BIND
