@@ -15,7 +15,8 @@ x-server: &server
   image: ${IMAGE_PREFIX:-ghcr.io/kevinmakwana/realtime-board}-server:${IMAGE_TAG:-latest}${SERVER_IMAGE_PIN:-}
   restart: unless-stopped
   environment: &server-env
-    NODE_ENV: production # the image sets it too; JWT_SECRET must then be private, and dev sign-in is off
+    NODE_ENV: production # the image sets it too; JWT_SECRET must then be private, and dev sign-in is off unless AUTH_DEV_LOGIN
+    AUTH_DEV_LOGIN: ${AUTH_DEV_LOGIN:-false} # true only for a public demo: anyone can then sign in as anyone (see docs/deploy.md)
     PORT: "3001"
     DATABASE_URL: postgres://board:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/board
     REDIS_URL: redis://redis:6379
@@ -60,6 +61,26 @@ services:
       server-1: { condition: service_healthy }
       server-2: { condition: service_healthy }
 
+  # Automatic HTTPS (Let's Encrypt) in front of nginx. Off unless you start it: docker compose --profile tls up -d
+  # Needs DOMAIN pointed at this host, ports 80 and 443 open, and HTTP_PORT set to something other than 80 (nginx
+  # would otherwise take the port Caddy needs). With DOMAIN unset or localhost it serves a local self-signed cert.
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web: { condition: service_started }
+
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -88,3 +109,5 @@ services:
 
 volumes:
   pgdata:
+  caddy_data:
+  caddy_config:

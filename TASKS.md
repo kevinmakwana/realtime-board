@@ -91,6 +91,7 @@
 - [x] ~~**Load test: reconnect storm and instance restart**~~ (2026-10-28)
   - `STORM_AT`/`STORM_SPREAD`/`STORM_COLD`, `RECONNECT`, `SEED_CARDS` in `loadtest/board.js`: users now reconnect with their last seq, resync is timed (`resync_ms`, `join_bytes`, `outage_ms`), gaps are checked across reconnects, a script exception fails the run (`script_errors`). 3 storm runs (100 users: join answered p95 10 to 14 ms) and 3 restart-under-load runs (back in about 1 s, zero lost); CI runs a 10-user storm smoke
   - Found while testing my own script: `socket.clearInterval` does not exist in k6, and `setTimeout(0)` throws; both crashed a VU silently until `script_errors` was added
+- [x] ~~**One-command public demo**~~ (2026-10-29): `deploy/demo-up.sh <domain>` writes secrets, starts the production stack with Caddy HTTPS (`tls` profile), loads the demo board. Tested locally from the published images (HTTPS, two instances, live sync, re-run does not seed twice). Not yet run on a real VPS, and no instance is hosted yet
 
 ## Waiting On
 
