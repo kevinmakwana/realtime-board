@@ -111,7 +111,7 @@ jobs:
             curl -fsS "http://localhost:8088/socket.io/?EIO=4&transport=polling&cid=ci-$node&node=$node" | grep -q '"sid"'
           done
           curl -fsS http://localhost:8088/ | grep -q "Realtime Board"
-      - uses: grafana/setup-k6-action@v1.2.2
+      - uses: grafana/setup-k6-action@v1.3.0
         with:
           k6-version: 2.3.0 # the script uses k6/ws; bump on purpose
       - name: Load test smoke (10 users for 10 s; fails on any lost, repeated or refused event)
