@@ -57,7 +57,7 @@ jobs:
           else tag=latest; fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "Deploying $tag" >> "$GITHUB_STEP_SUMMARY"
-      - uses: sigstore/cosign-installer@v4.1.2
+      - uses: sigstore/cosign-installer@v4.1.3
         with:
           cosign-release: v3.1.4
       - uses: docker/login-action@v4.7.0
