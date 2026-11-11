@@ -76,7 +76,7 @@ services:
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     restart: unless-stopped
     # Redis only carries fan-out, presence and rate-limit counters; nothing in it needs to survive a restart.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
